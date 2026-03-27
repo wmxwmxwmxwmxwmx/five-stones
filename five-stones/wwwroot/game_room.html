@@ -1,0 +1,1035 @@
+<!doctype html>
+<html lang="zh-CN">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>游戏房间 - 五子棋</title>
+  <style>
+    :root {
+      --bg0: #050817;
+      --bg1: #070b1f;
+      --card: rgba(11, 18, 41, 0.62);
+      --card2: rgba(4, 10, 30, 0.48);
+      --text: rgba(236, 245, 255, 0.92);
+      --muted: rgba(236, 245, 255, 0.72);
+      --line: rgba(122, 255, 255, 0.28);
+      --cyan: #2efcff;
+      --magenta: #ff4fd8;
+      --violet: #7c5cff;
+      --shadow: 0 0 24px rgba(46, 252, 255, 0.16);
+      --shadow2: 0 0 40px rgba(255, 79, 216, 0.12);
+      --radius: 14px;
+      --radius2: 12px;
+    }
+
+    body {
+      font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+      margin: 16px;
+      color: var(--text);
+      min-height: 100vh;
+      background:
+        radial-gradient(900px 600px at 10% 0%, rgba(46, 252, 255, 0.22), transparent 60%),
+        radial-gradient(800px 520px at 95% 10%, rgba(255, 79, 216, 0.18), transparent 55%),
+        radial-gradient(700px 520px at 50% 110%, rgba(124, 92, 255, 0.12), transparent 55%),
+        linear-gradient(180deg, var(--bg0), var(--bg1));
+    }
+
+    body::before {
+      content: "";
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      background-image:
+        linear-gradient(rgba(255, 255, 255, 0.03) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255, 255, 255, 0.02) 1px, transparent 1px);
+      background-size: 46px 46px, 46px 46px;
+      opacity: 0.25;
+    }
+
+    .wrap {
+      display: flex;
+      gap: 16px;
+      align-items: flex-start;
+      max-width: 980px;
+      margin: 0 auto;
+    }
+
+    #chess {
+      border: 1px solid rgba(46, 252, 255, 0.28);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow), var(--shadow2);
+      cursor: pointer;
+    }
+
+    #screen {
+      margin: 10px 0;
+      min-height: 24px;
+      color: var(--muted);
+      background: rgba(0, 0, 0, 0.12);
+      border: 1px solid rgba(255, 79, 216, 0.15);
+      border-radius: var(--radius2);
+      padding: 8px 10px;
+      transition: border-color 180ms ease, box-shadow 180ms ease, color 180ms ease, transform 180ms ease;
+    }
+
+    #screen.screen-win {
+      color: var(--text);
+      border-color: rgba(46, 252, 255, 0.45);
+      background: rgba(0, 0, 0, 0.08);
+      box-shadow: 0 0 0 1px rgba(46, 252, 255, 0.12), 0 0 36px rgba(46, 252, 255, 0.18);
+      font-weight: 800;
+      text-shadow: 0 0 16px rgba(46, 252, 255, 0.3);
+    }
+
+    #screen.screen-lose {
+      color: rgba(255, 120, 214, 0.95);
+      border-color: rgba(255, 79, 216, 0.4);
+      background: rgba(0, 0, 0, 0.08);
+      box-shadow: 0 0 0 1px rgba(255, 79, 216, 0.12), 0 0 30px rgba(255, 79, 216, 0.14);
+      font-weight: 750;
+      text-shadow: 0 0 16px rgba(255, 79, 216, 0.25);
+    }
+
+    #timePanel {
+      margin: 6px 0;
+      white-space: pre-wrap;
+      font-size: 14px;
+      color: var(--muted);
+      min-height: 20px;
+      background: rgba(0, 0, 0, 0.12);
+      border: 1px solid rgba(122, 255, 255, 0.18);
+      border-radius: var(--radius2);
+      padding: 8px 10px;
+    }
+
+    #rematchPanel {
+      margin: 8px 0 6px;
+      padding: 8px 10px;
+      border-radius: var(--radius2);
+      border: 1px solid rgba(46, 252, 255, 0.25);
+      background: rgba(0, 0, 0, 0.10);
+      box-shadow: 0 0 0 1px rgba(46, 252, 255, 0.06), 0 0 26px rgba(46, 252, 255, 0.10);
+    }
+
+    #rematchText {
+      color: var(--muted);
+      white-space: pre-wrap;
+      margin-bottom: 8px;
+    }
+
+    #rematchInviteBtn,
+    #rematchAcceptBtn {
+      width: 100%;
+      margin-top: 8px;
+      padding: 10px 10px;
+      border-radius: var(--radius2);
+      border: 1px solid rgba(46, 252, 255, 0.35);
+      background: linear-gradient(135deg, rgba(46, 252, 255, 0.18), rgba(255, 79, 216, 0.12));
+      color: var(--text);
+      box-shadow: 0 0 0 1px rgba(46, 252, 255, 0.08), var(--shadow);
+      cursor: pointer;
+      transition: transform 120ms ease, box-shadow 180ms ease, border-color 180ms ease;
+    }
+
+    #rematchInviteBtn:disabled,
+    #rematchAcceptBtn:disabled {
+      opacity: 0.55;
+      cursor: not-allowed;
+    }
+
+    #backHallBtn {
+      display: inline-block;
+      padding: 10px 14px;
+      cursor: pointer;
+      border-radius: var(--radius2);
+      border: 1px solid rgba(46, 252, 255, 0.35);
+      background:
+        linear-gradient(135deg, rgba(46, 252, 255, 0.18), rgba(255, 79, 216, 0.12));
+      color: var(--text);
+      box-shadow: 0 0 0 1px rgba(46, 252, 255, 0.08), var(--shadow);
+      transition: transform 120ms ease, box-shadow 180ms ease, border-color 180ms ease;
+      margin-top: 6px;
+      width: auto;
+    }
+
+    #chat {
+      width: 320px;
+    }
+
+    #chatShow {
+      height: 420px;
+      border: 1px solid rgba(46, 252, 255, 0.22);
+      border-radius: var(--radius);
+      background: rgba(0, 0, 0, 0.12);
+      overflow: auto;
+      padding: 8px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    #chatShow p {
+      margin: 0;
+      padding: 10px 12px;
+      border-radius: 14px;
+      max-width: 92%;
+      line-height: 1.35;
+      word-break: break-word;
+      white-space: pre-wrap;
+      border: 1px solid rgba(255, 255, 255, 0.06);
+      box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.08), 0 0 20px rgba(46, 252, 255, 0.07);
+      backdrop-filter: blur(6px);
+    }
+
+    #chatShow .chat-prefix {
+      font-weight: 850;
+      text-shadow: 0 0 14px rgba(46, 252, 255, 0.22);
+      margin-right: 6px;
+    }
+
+    #chatInput {
+      width: 100%;
+      box-sizing: border-box;
+      margin-top: 8px;
+      padding: 10px 10px;
+      border-radius: var(--radius2);
+      border: 1px solid rgba(255, 79, 216, 0.22);
+      background: rgba(0, 0, 0, 0.12);
+      color: var(--text);
+    }
+
+    #chatBtn {
+      width: 100%;
+      margin-top: 8px;
+      padding: 10px 10px;
+      border-radius: var(--radius2);
+      border: 1px solid rgba(46, 252, 255, 0.35);
+      background:
+        linear-gradient(135deg, rgba(46, 252, 255, 0.18), rgba(255, 79, 216, 0.12));
+      color: var(--text);
+      box-shadow: 0 0 0 1px rgba(46, 252, 255, 0.08), var(--shadow);
+      cursor: pointer;
+      transition: transform 120ms ease, box-shadow 180ms ease, border-color 180ms ease;
+    }
+
+    .self {
+      color: #38bdf8;
+      align-self: flex-end;
+      background: rgba(56, 189, 248, 0.12);
+      border-color: rgba(56, 189, 248, 0.35);
+      box-shadow: 0 0 0 1px rgba(56, 189, 248, 0.10), 0 0 28px rgba(56, 189, 248, 0.14);
+    }
+
+    .peer {
+      color: #34d399;
+      align-self: flex-start;
+      background: rgba(52, 211, 153, 0.10);
+      border-color: rgba(52, 211, 153, 0.32);
+      box-shadow: 0 0 0 1px rgba(52, 211, 153, 0.10), 0 0 28px rgba(52, 211, 153, 0.12);
+    }
+
+    #chatBtn:disabled,
+    #chatInput:disabled {
+      opacity: 0.55;
+      cursor: not-allowed;
+    }
+
+    button {
+      font-family: inherit;
+    }
+
+    #backHallBtn:hover,
+    #chatBtn:hover {
+      border-color: rgba(46, 252, 255, 0.65);
+      box-shadow: 0 0 0 1px rgba(46, 252, 255, 0.16), 0 0 34px rgba(46, 252, 255, 0.18);
+      transform: translateY(-1px);
+    }
+
+    #backHallBtn:active,
+    #chatBtn:active {
+      transform: translateY(0px);
+    }
+
+    #backHallBtn:focus-visible,
+    #chatBtn:focus-visible,
+    #chatInput:focus-visible {
+      outline: 2px solid rgba(255, 79, 216, 0.65);
+      outline-offset: 2px;
+    }
+  </style>
+</head>
+
+<body>
+  <h2>游戏房间</h2>
+  <div class="wrap">
+    <div>
+      <canvas id="chess" width="450" height="450"></canvas>
+      <div id="screen">等待房间就绪...</div>
+      <div id="timePanel">局时：-- 步时：--</div>
+      <div id="rematchPanel" style="display: none;">
+        <div id="rematchText">对局结束后可以发起再来一局。</div>
+        <button id="rematchInviteBtn">邀请再来一局</button>
+        <button id="rematchAcceptBtn">同意再来一局</button>
+      </div>
+      <button id="backHallBtn">返回大厅</button>
+    </div>
+    <div id="chat">
+      <div id="chatShow"></div>
+      <input id="chatInput" type="text" placeholder="输入聊天消息" />
+      <button id="chatBtn">发送</button>
+    </div>
+  </div>
+
+  <script>
+    const SIZE = 15; // 棋盘大小
+    const CELL = 30; // 棋盘格子大小
+    const board = Array.from({ length: SIZE }, () => Array(SIZE).fill(0));// 棋盘数组
+    const chess = document.getElementById("chess"); // 棋盘元素
+    const ctx = chess.getContext("2d"); // 棋盘上下文
+    const screen = document.getElementById("screen"); // 状态显示区域
+    const chatShow = document.getElementById("chatShow"); // 聊天显示区域
+    const chatInput = document.getElementById("chatInput"); // 聊天输入区域
+    const chatBtn = document.getElementById("chatBtn"); // 发送按钮
+    const backHallBtn = document.getElementById("backHallBtn"); // 返回大厅按钮
+    const timePanel = document.getElementById("timePanel"); // 局时/步时显示
+    const rematchPanel = document.getElementById("rematchPanel"); // 再来一局面板
+    const rematchText = document.getElementById("rematchText"); // 再来一局文案
+    const rematchInviteBtn = document.getElementById("rematchInviteBtn"); // 邀请按钮
+    const rematchAcceptBtn = document.getElementById("rematchAcceptBtn"); // 同意按钮
+
+    let ws = null;
+    let roomInfo = null; // 房间信息
+    let myTurn = false; // 是否轮到自己落子
+    let status = "playing"; // playing（游戏中）/over（游戏结束）
+    let manualLeaving = false; // 是否主动返回大厅
+
+    // 观战模式：通过 ?spectate=1&room_id=RID 进入
+    const params = new URLSearchParams(location.search);
+    const isSpectator = params.get("spectate") === "1" || params.get("spectate") === "true";
+    const spectateRoomId = params.get("room_id");
+
+    if (isSpectator) {
+      // 观战不允许聊天
+      chatInput.disabled = true;
+      chatBtn.disabled = true;
+      if (rematchPanel) rematchPanel.style.display = "none";
+      if (rematchInviteBtn) rematchInviteBtn.disabled = true;
+      if (rematchAcceptBtn) rematchAcceptBtn.disabled = true;
+    }
+
+    // === 局时/步时（前端仅做显示与在归零时上报超时；权威判定在后端）===
+    const TOTAL_INIT_MS_DEFAULT = 600000; // 600s
+    const STEP_INIT_MS_DEFAULT = 30000; // 30s
+    let totalInitMs = TOTAL_INIT_MS_DEFAULT;
+    let stepInitMs = STEP_INIT_MS_DEFAULT;
+
+    let timingStarted = false; // 第一次合法落子后开始
+    let totalLeftWhiteMs = totalInitMs;
+    let totalLeftBlackMs = totalInitMs;
+    let stepLeftWhiteMs = stepInitMs;
+    let stepLeftBlackMs = stepInitMs;
+
+    let tickTimerId = null;
+    let lastTickMs = 0;
+    let timeoutSent = false; // 避免重复上报超时
+    let activeThinkingUid = 0; // 观战端：当前正在思考的玩家 uid（用于递减对应局时）
+    let lastHighlight = null; // { row, col }：仅玩家端，用于高亮对方最后一步
+    let rematchInviterUid = 0; // 邀请方 uid（仅 UI 状态使用）
+    const LOG_INGEST_FULL_URL =
+      ((location.protocol === "https:") ? "https://localhost:7285/ingest/" : "http://localhost:7285/ingest/") +
+      "4c312b70-2715-49f1-839e-eb92aebc1cdd";
+
+    function pad2(n) {
+      return String(n).padStart(2, "0");
+    }
+    function formatTotal(ms) {
+      const totalSec = Math.max(0, Math.ceil(ms / 1000));
+      const m = Math.floor(totalSec / 60);
+      const s = totalSec % 60;
+      return `${m}:${pad2(s)}`;
+    }
+    function formatStep(ms) {
+      const totalSec = Math.max(0, Math.ceil(ms / 1000));
+      return `${totalSec}秒`;
+    }
+
+    function setScreenResult(result) {
+      // result: "win" | "lose" | null
+      screen.classList.remove("screen-win", "screen-lose");
+      if (result === "win") screen.classList.add("screen-win");
+      else if (result === "lose") screen.classList.add("screen-lose");
+    }
+    function renderTimePanel() {
+      if (!timePanel) return;
+      if (!timingStarted) {
+        const whiteName = (roomInfo && roomInfo.white_username) ? roomInfo.white_username : "白方";
+        const blackName = (roomInfo && roomInfo.black_username) ? roomInfo.black_username : "黑方";
+        timePanel.textContent = `白方（${whiteName}）：局时：-- 步时：--\n黑方（${blackName}）：局时：-- 步时：--`;
+        return;
+      }
+      const whiteName = (roomInfo && roomInfo.white_username) ? roomInfo.white_username : "白方";
+      const blackName = (roomInfo && roomInfo.black_username) ? roomInfo.black_username : "黑方";
+      timePanel.textContent =
+        `白方（${whiteName}）：局时：${formatTotal(totalLeftWhiteMs)} 步时：${formatStep(stepLeftWhiteMs)}\n` +
+        `黑方（${blackName}）：局时：${formatTotal(totalLeftBlackMs)} 步时：${formatStep(stepLeftBlackMs)}`;
+    }
+    function stopClock() {
+      if (tickTimerId) {
+        clearInterval(tickTimerId);
+        tickTimerId = null;
+      }
+    }
+    function startClock() {
+      stopClock();
+      timeoutSent = false;
+      lastTickMs = performance.now();
+      tickTimerId = setInterval(tickClock, 250);
+    }
+    function tickClock() {
+      if (!timingStarted || status !== "playing") {
+        stopClock();
+        return;
+      }
+      if (!roomInfo || !activeThinkingUid) {
+        stopClock();
+        return;
+      }
+
+      const now = performance.now();
+      const delta = now - lastTickMs; // ms
+      lastTickMs = now;
+
+      // 只递减“当前思考方”的局时+步时，另一方保持不变
+      let activeTotalLeftMs = 0;
+      let activeStepLeftMs = 0;
+      if (activeThinkingUid === roomInfo.white_id) {
+        totalLeftWhiteMs = Math.max(0, totalLeftWhiteMs - delta);
+        stepLeftWhiteMs = Math.max(0, stepLeftWhiteMs - delta);
+        activeTotalLeftMs = totalLeftWhiteMs;
+        activeStepLeftMs = stepLeftWhiteMs;
+      } else if (activeThinkingUid === roomInfo.black_id) {
+        totalLeftBlackMs = Math.max(0, totalLeftBlackMs - delta);
+        stepLeftBlackMs = Math.max(0, stepLeftBlackMs - delta);
+        activeTotalLeftMs = totalLeftBlackMs;
+        activeStepLeftMs = stepLeftBlackMs;
+      } else {
+        stopClock();
+        return;
+      }
+
+      renderTimePanel();
+
+      if (!timeoutSent && (activeStepLeftMs <= 0 || activeTotalLeftMs <= 0)) {
+        timeoutSent = true;
+        stopClock();
+        // 只有“当前思考方且是本客户端”才上报 timeout
+        if (!isSpectator && activeThinkingUid === roomInfo.uid && ws && ws.readyState === WebSocket.OPEN) {
+          const which = activeStepLeftMs <= 0 ? "step" : "total";
+          ws.send(JSON.stringify({
+            optype: "timeout",
+            room_id: roomInfo.room_id,
+            uid: roomInfo.uid,
+            which
+          }));
+        }
+        renderTimePanel();
+      }
+    }
+
+    function drawBoard() { // 绘制棋盘
+      ctx.clearRect(0, 0, 450, 450);
+      ctx.strokeStyle = "#bbb";
+      for (let i = 0; i < SIZE; i++) {
+        ctx.beginPath();
+        ctx.moveTo(15 + i * CELL, 15);
+        ctx.lineTo(15 + i * CELL, 435);
+        ctx.stroke();
+
+        ctx.beginPath();
+        ctx.moveTo(15, 15 + i * CELL);
+        ctx.lineTo(435, 15 + i * CELL);
+        ctx.stroke();
+      }
+    }
+
+    function drawPiece(row, col, white) { // 绘制棋子
+      ctx.beginPath();
+      ctx.arc(15 + col * CELL, 15 + row * CELL, 13, 0, Math.PI * 2);
+      ctx.closePath();
+      const g = ctx.createRadialGradient(15 + col * CELL + 2, 15 + row * CELL - 2, 13, 15 + col * CELL + 2, 15 + row * CELL - 2, 0);
+      if (white) {
+        g.addColorStop(0, "#d1d1d1");
+        g.addColorStop(1, "#f9f9f9");
+      } else {
+        // 黑棋更醒目：深蓝绿渐变 + 外发光描边
+        g.addColorStop(0, "#001a2b");
+        g.addColorStop(1, "#0a4d6e");
+      }
+      ctx.fillStyle = g;
+      ctx.fill();
+
+      // 白棋也做描边，让棋子与棋盘线/背景有更强对比
+      ctx.lineWidth = white ? 2.2 : 2.6;
+      ctx.strokeStyle = "rgba(46, 252, 255, 0.55)";
+      ctx.stroke();
+    }
+
+    function redrawAllPieces() {
+      // 关键：清空整个画布，避免外环/霓虹 glow 的像素残留
+      ctx.clearRect(0, 0, 450, 450);
+      drawBoard();
+      for (let r = 0; r < SIZE; r++) {
+        for (let c = 0; c < SIZE; c++) {
+          const v = board[r][c];
+          if (v === 1) drawPiece(r, c, true);
+          else if (v === 2) drawPiece(r, c, false);
+        }
+      }
+    }
+
+    function drawMoveHighlight(row, col) {
+      const x = 15 + col * CELL;
+      const y = 15 + row * CELL;
+      ctx.save();
+      ctx.beginPath();
+      ctx.arc(x, y, 17, 0, Math.PI * 2);
+      ctx.lineWidth = 3.2;
+      ctx.strokeStyle = "rgba(255, 211, 110, 0.95)";
+      ctx.shadowColor = "rgba(255, 211, 110, 0.55)";
+      ctx.shadowBlur = 14;
+      ctx.stroke();
+      ctx.restore();
+
+      // #region agent log
+      fetch(LOG_INGEST_FULL_URL,{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'a02d2a'},body:JSON.stringify({sessionId:'a02d2a',runId:'pre-fix',hypothesisId:'lm-highlight-stale',location:'game_room.html:drawMoveHighlight',message:'drawMoveHighlight',data:{row,col,lastHighlight:lastHighlight?{row:lastHighlight.row,col:lastHighlight.col}:null},timestamp:Date.now()})}).catch(()=>{});
+      // #endregion
+    }
+
+    function clearLastHighlight() {
+      if (!lastHighlight) return;
+      const { row, col } = lastHighlight;
+      const isWhite = board[row][col] === 1;
+      // 重新绘制棋子即可移除外环（因为外环不会在 drawPiece 中重复绘制）
+
+      // #region agent log
+      fetch(LOG_INGEST_FULL_URL,{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'a02d2a'},body:JSON.stringify({sessionId:'a02d2a',runId:'pre-fix',hypothesisId:'lm-highlight-erase',location:'game_room.html:clearLastHighlight',message:'clearLastHighlight begin',data:{row,col,boardVal:board[row][col],isWhite,lastHighlightBefore:{row,col}},timestamp:Date.now()})}).catch(()=>{});
+      // #endregion
+
+      // 清空+重绘整个画布，确保旧的外环/glow 没有残留像素
+      lastHighlight = null;
+      redrawAllPieces();
+      lastHighlight = null;
+
+      // #region agent log
+      fetch(LOG_INGEST_FULL_URL,{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'a02d2a'},body:JSON.stringify({sessionId:'a02d2a',runId:'pre-fix',hypothesisId:'lm-highlight-erase',location:'game_room.html:clearLastHighlight',message:'clearLastHighlight end',data:{lastHighlight:lastHighlight},timestamp:Date.now()})}).catch(()=>{});
+      // #endregion
+    }
+
+    function appendChat(msg, isSelf) { // 添加聊天消息
+      const p = document.createElement("p");
+      p.className = isSelf ? "self" : "peer";
+      const prefix = isSelf ? "你" : "对方";
+      // 用独立 span 渲染前缀，避免由于样式/文本渲染导致前缀不可见
+      const prefixEl = document.createElement("span");
+      prefixEl.className = "chat-prefix";
+      prefixEl.textContent = `${prefix}：`;
+      const bodyEl = document.createElement("span");
+      bodyEl.textContent = msg;
+      p.appendChild(prefixEl);
+      p.appendChild(bodyEl);
+      chatShow.appendChild(p);
+      chatShow.scrollTop = chatShow.scrollHeight;
+    }
+
+    function refreshTurnText() { // 刷新状态显示
+      setScreenResult(null);
+      screen.textContent = myTurn ? "轮到你落子" : "等待对方落子";
+    }
+
+    function hideRematchPanel() {
+      if (!rematchPanel) return;
+      rematchPanel.style.display = "none";
+    }
+
+    function showRematchPanel(inviterUid) {
+      if (isSpectator) return;
+      if (!rematchPanel || !rematchInviteBtn || !rematchAcceptBtn || !rematchText) return;
+      rematchPanel.style.display = "block";
+      rematchInviterUid = inviterUid || 0;
+
+      const whiteName = roomInfo && (roomInfo.white_username || roomInfo.black_username);
+      let inviterName = "";
+      if (roomInfo) {
+        if (inviterUid === roomInfo.white_id) inviterName = roomInfo.white_username || "白方";
+        else if (inviterUid === roomInfo.black_id) inviterName = roomInfo.black_username || "黑方";
+      }
+
+      if (inviterUid && inviterUid === roomInfo.uid) {
+        rematchText.textContent = `已向${inviterName || "对方"}发起再来一局，等待对方同意...`;
+        rematchInviteBtn.disabled = true;
+        rematchInviteBtn.style.display = "inline-block";
+        rematchAcceptBtn.style.display = "none";
+      } else {
+        rematchText.textContent = `${inviterName || "对方"}邀请你再来一局，是否同意？`;
+        rematchInviteBtn.style.display = "none";
+        rematchAcceptBtn.style.display = "inline-block";
+        rematchAcceptBtn.disabled = false;
+      }
+    }
+
+    function showRematchInviteStarter() {
+      if (isSpectator) return;
+      if (!rematchPanel || !rematchInviteBtn || !rematchAcceptBtn || !rematchText) return;
+      rematchPanel.style.display = "block";
+      rematchInviterUid = 0;
+      rematchText.textContent = "再来一局：点击下方按钮邀请对方。";
+      rematchInviteBtn.style.display = "inline-block";
+      rematchInviteBtn.disabled = false;
+      rematchAcceptBtn.style.display = "none";
+    }
+
+    function resetRematchUIOnStart() {
+      rematchInviterUid = 0;
+      hideRematchPanel();
+    }
+
+    function sendRematchInvite() {
+      if (isSpectator) return;
+      if (!ws || ws.readyState !== WebSocket.OPEN || !roomInfo) return;
+      if (status !== "over") return;
+      if (rematchInviteBtn) rematchInviteBtn.disabled = true;
+      if (rematchAcceptBtn) rematchAcceptBtn.style.display = "none";
+      if (rematchText) rematchText.textContent = "再来一局：邀请已发送，等待对方同意...";
+      ws.send(JSON.stringify({
+        optype: "rematch_invite",
+        room_id: roomInfo.room_id,
+        uid: roomInfo.uid
+      }));
+    }
+
+    function sendRematchAccept() {
+      if (isSpectator) return;
+      if (!ws || ws.readyState !== WebSocket.OPEN || !roomInfo) return;
+      if (status !== "over") return;
+      if (rematchAcceptBtn) rematchAcceptBtn.disabled = true;
+      if (rematchText) rematchText.textContent = "再来一局：已同意，等待对局开始...";
+      ws.send(JSON.stringify({
+        optype: "rematch_accept",
+        room_id: roomInfo.room_id,
+        uid: roomInfo.uid
+      }));
+    }
+
+    function applyRematchStart(info, spectatorMode) {
+      status = "playing";
+      timingStarted = false;
+      timeoutSent = false;
+      activeThinkingUid = 0;
+
+      if (typeof info.total_init_ms !== "undefined") totalInitMs = info.total_init_ms;
+      if (typeof info.step_init_ms !== "undefined") stepInitMs = info.step_init_ms;
+      totalLeftWhiteMs = totalInitMs;
+      totalLeftBlackMs = totalInitMs;
+      stepLeftWhiteMs = stepInitMs;
+      stepLeftBlackMs = stepInitMs;
+
+      lastHighlight = null;
+      stopClock();
+      for (let r = 0; r < SIZE; r++) {
+        for (let c = 0; c < SIZE; c++) board[r][c] = 0;
+      }
+      drawBoard();
+
+      // 更新房间角色信息（前端仅用于显示/计算轮到谁）
+      if (!roomInfo) roomInfo = {};
+      roomInfo.room_id = info.room_id || roomInfo.room_id;
+      roomInfo.white_id = info.white_id || roomInfo.white_id;
+      roomInfo.black_id = info.black_id || roomInfo.black_id;
+      roomInfo.white_username = info.white_username || roomInfo.white_username;
+      roomInfo.black_username = info.black_username || roomInfo.black_username;
+
+      resetRematchUIOnStart();
+
+      const whiteName = roomInfo.white_username || "白方";
+      const blackName = roomInfo.black_username || "黑方";
+
+      if (spectatorMode) {
+        setScreenResult(null);
+        screen.textContent = `白：${whiteName} 黑：${blackName}`;
+      } else {
+        myTurn = (roomInfo.uid != roomInfo.white_id);
+        refreshTurnText();
+      }
+
+      renderTimePanel();
+    }
+
+    function handlePutChess(info) { // 处理落子
+      const row = info.row;
+      const col = info.col;
+      console.log("落子信息：", info.row, info.col);
+      const uid = info.uid;
+      if (row >= 0 && col >= 0 && row < SIZE && col < SIZE) {
+        const isWhite = uid === roomInfo.white_id;
+        board[row][col] = isWhite ? 1 : 2;
+        drawPiece(row, col, isWhite);
+        if (!isSpectator) {
+          // 移除上一手高亮，再按“轮到我时”决定是否高亮本手
+
+          // #region agent log
+          fetch(LOG_INGEST_FULL_URL,{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'a02d2a'},body:JSON.stringify({sessionId:'a02d2a',runId:'pre-fix',hypothesisId:'lm-highlight-flow',location:'game_room.html:handlePutChess',message:'before clear/draw highlight',data:{uid,row,col,isWhite,myTurnBefore:myTurn,lastHighlightBefore:lastHighlight?{row:lastHighlight.row,col:lastHighlight.col}:null},timestamp:Date.now()})}).catch(()=>{});
+          // #endregion
+
+          // 不依赖 lastHighlight 状态，先把棋盘/棋子整体重绘一次，确保历史外环像素不残留
+          lastHighlight = null;
+          redrawAllPieces();
+          myTurn = uid !== roomInfo.uid;
+          if (myTurn) {
+            drawMoveHighlight(row, col);
+            lastHighlight = { row, col };
+          }
+
+          // #region agent log
+          fetch(LOG_INGEST_FULL_URL,{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'a02d2a'},body:JSON.stringify({sessionId:'a02d2a',runId:'pre-fix',hypothesisId:'lm-highlight-flow',location:'game_room.html:handlePutChess',message:'after clear/draw highlight',data:{myTurn,lastHighlightAfter:lastHighlight?{row:lastHighlight.row,col:lastHighlight.col}:null},timestamp:Date.now()})}).catch(()=>{});
+          // #endregion
+          screen.textContent = myTurn ? "轮到你落子" : "等待对方落子";
+        }
+        // refreshTurnText();
+      }
+
+      // 服务端在每次 put_chess 广播时（当计时开始后）会附带计时字段
+      if (typeof info.timing_started !== "undefined") {
+        timingStarted = info.timing_started === true;
+        if (timingStarted) {
+          if (typeof info.total_left_white_ms !== "undefined") totalLeftWhiteMs = info.total_left_white_ms;
+          if (typeof info.total_left_black_ms !== "undefined") totalLeftBlackMs = info.total_left_black_ms;
+          if (typeof info.step_init_ms !== "undefined") stepInitMs = info.step_init_ms;
+
+          // 根据“刚落子者”的颜色推导下一轮思考方，并只重置该思考方的步时
+          if (roomInfo) {
+            activeThinkingUid = (uid === roomInfo.white_id) ? roomInfo.black_id : roomInfo.white_id;
+            if (activeThinkingUid === roomInfo.white_id) stepLeftWhiteMs = stepInitMs;
+            else if (activeThinkingUid === roomInfo.black_id) stepLeftBlackMs = stepInitMs;
+            stopClock();
+            startClock();
+            renderTimePanel();
+          }
+        } else {
+          // 计时尚未开始：停止本地计时
+          stopClock();
+          timeoutSent = false;
+          activeThinkingUid = 0;
+          renderTimePanel();
+        }
+      }
+
+      if (info.winner && info.winner !== 0) {
+        status = "over";
+        stopClock();
+        clearLastHighlight();
+        if (!isSpectator) {
+          if (info.winner === roomInfo.uid) {
+            setScreenResult("win");
+            screen.textContent = "你获胜了！";
+          } else {
+            setScreenResult("lose");
+            screen.textContent = "你失败了！";
+          }
+              showRematchInviteStarter();
+        } else {
+          // 观战模式：不使用 roomInfo.uid（无“你”概念），根据赢家所属颜色显示
+          setScreenResult("win");
+          if (info.winner === roomInfo.white_id) screen.textContent = (roomInfo.white_username || "白方") + "获胜！";
+          else if (info.winner === roomInfo.black_id) screen.textContent = (roomInfo.black_username || "黑方") + "获胜！";
+          else {
+            setScreenResult(null);
+            screen.textContent = "对局结束！";
+          }
+        }
+        timeoutSent = true;
+        renderTimePanel();
+        return;
+      }
+
+      // 计时的递减由 tickClock() 负责；这里只刷新面板展示
+      renderTimePanel();
+
+    }
+
+    function sendChat() { // 发送聊天消息
+      if (isSpectator) return;
+      const text = chatInput.value.trim();
+      if (!text) return;
+      if (!ws || ws.readyState !== WebSocket.OPEN || !roomInfo) return;
+      ws.send(JSON.stringify({
+        optype: "chat",
+        room_id: roomInfo.room_id,
+        uid: roomInfo.uid,
+        message: text
+      }));
+      // 发送成功后清空输入框
+      chatInput.value = "";
+    }
+
+    function sendChess(row, col) { // 发送落子
+      if (isSpectator) return;
+      if (!ws || ws.readyState !== WebSocket.OPEN || !roomInfo) return;
+      ws.send(JSON.stringify({
+        optype: "put_chess",
+        room_id: roomInfo.room_id,
+        uid: roomInfo.uid,
+        row,
+        col
+      }));
+    }
+
+    function leaveToHall() {
+      manualLeaving = true;
+      status = "over";
+      stopClock();
+      timeoutSent = true; // 离开时不再允许继续通过倒计时上报超时
+      if (ws && ws.readyState === WebSocket.OPEN) ws.close();
+      location.replace("/game_hall.html");
+    }
+
+    chess.onclick = (e) => { // 棋盘点击事件
+      if (isSpectator) return;
+      if (!roomInfo) return;
+      if (status === "over") {
+        alert("游戏已经结束了");
+        return;
+      }
+      if (!myTurn) {
+        alert("还没轮到你");
+        return;
+      }
+      const col = Math.floor(e.offsetX / CELL);
+      const row = Math.floor(e.offsetY / CELL);
+      if (row < 0 || col < 0 || row >= SIZE || col >= SIZE) return;
+      if (board[row][col] !== 0) {
+        alert("当前位置已有棋子");
+        return;
+      }
+      sendChess(row, col);
+    };
+
+    chatBtn.onclick = sendChat; // 发送按钮点击事件
+    backHallBtn.onclick = leaveToHall; // 返回大厅按钮点击事件
+    if (rematchInviteBtn) rematchInviteBtn.onclick = sendRematchInvite;
+    if (rematchAcceptBtn) rematchAcceptBtn.onclick = sendRematchAccept;
+    chatInput.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") sendChat();
+    });
+
+    function buildWsUrl(path) {
+      const wsProtocol = location.protocol === "https:" ? "wss:" : "ws:";
+      return wsProtocol + "//" + location.host + path;
+    }
+
+    function initSocket() { // 初始化 WebSocket 连接
+      if (isSpectator) {
+        ws = new WebSocket(buildWsUrl("/spectate"));
+        ws.onopen = () => {
+          if (spectateRoomId) {
+            ws.send(JSON.stringify({
+              optype: "spectate_join",
+              room_id: Number(spectateRoomId)
+            }));
+          }
+        };
+        ws.onclose = () => { };
+        ws.onerror = () => { };
+        ws.onmessage = (evt) => {
+          let info = {}; // 服务器返回的消息 （JSON 对象）
+          try { info = JSON.parse(evt.data); } catch (_) { return; }
+
+          if (info.result === false) { // 请求失败
+            alert(info.reason || "请求失败");
+            return;
+          }
+
+          if (info.optype === "spectate_ready") {
+            roomInfo = info;
+            status = "playing";
+            timingStarted = false;
+            timeoutSent = false;
+            activeThinkingUid = 0;
+            lastHighlight = null;
+            stopClock();
+
+            // 清空棋盘并绘制快照
+            for (let r = 0; r < SIZE; r++) {
+              for (let c = 0; c < SIZE; c++) board[r][c] = 0;
+            }
+            drawBoard();
+            if (Array.isArray(info.board_snapshot)) {
+              for (const cell of info.board_snapshot) {
+                const r = cell.row;
+                const c = cell.col;
+                const color = cell.color;
+                if (r >= 0 && c >= 0 && r < SIZE && c < SIZE) {
+                  board[r][c] = color;
+                  drawPiece(r, c, color === 1);
+                }
+              }
+            }
+
+            const whiteName = roomInfo.white_username || "白方";
+            const blackName = roomInfo.black_username || "黑方";
+            screen.textContent = `白：${whiteName} 黑：${blackName}`;
+            setScreenResult(null);
+            renderTimePanel();
+            return;
+          }
+
+          if (info.optype === "rematch_start") {
+            applyRematchStart(info, true);
+            return;
+          }
+
+          if (info.optype === "put_chess") {
+            handlePutChess(info);
+            return;
+          }
+
+          if (info.optype === "timeout") {
+            status = "over";
+            stopClock();
+            timeoutSent = true;
+            clearLastHighlight();
+            if (roomInfo && typeof info.winner !== "undefined") {
+              const winnerUid = info.winner;
+              if (winnerUid === roomInfo.white_id) {
+                setScreenResult("win");
+                screen.textContent = (roomInfo.white_username || "白方") + "获胜！";
+              } else if (winnerUid === roomInfo.black_id) {
+                setScreenResult("win");
+                screen.textContent = (roomInfo.black_username || "黑方") + "获胜！";
+              } else {
+                setScreenResult(null);
+                screen.textContent = info.reason || "对局结束（超时）";
+              }
+            } else {
+              setScreenResult(null);
+              screen.textContent = info.reason || "对局结束（超时）";
+            }
+            renderTimePanel();
+            return;
+          }
+
+          if (info.optype === "peer_left_room") {
+            status = "over";
+            stopClock();
+            timeoutSent = true;
+            clearLastHighlight();
+            setScreenResult(null);
+            screen.textContent = info.reason || "对方已退出房间";
+            return;
+          }
+        };
+      } else {
+        ws = new WebSocket(buildWsUrl("/room"));// 创建房间 WebSocket 对象，浏览器就会自动发起 WebSocket 握手请求
+        ws.onopen = () => { }; // 连接打开事件
+        ws.onclose = () => { }; // 连接关闭事件
+        ws.onerror = () => { }; // 连接错误事件
+        ws.onmessage = (evt) => {
+          let info = {}; // 服务器返回的消息 （JSON 对象）
+          try { info = JSON.parse(evt.data); } catch (_) { return; }
+
+          if (info.result === false) { // 请求失败
+            alert(info.reason || "请求失败");
+            return;
+          }
+
+          if (info.optype === "room_ready") { // 房间就绪
+            roomInfo = info;
+            lastHighlight = null;
+            myTurn = (roomInfo.uid != roomInfo.white_id);
+            refreshTurnText();
+
+            // 初始化计时初值（等待首手落子前仅展示不倒计时）
+            timingStarted = info.timing_started === true;
+            if (typeof info.total_init_ms !== "undefined") totalInitMs = info.total_init_ms;
+            if (typeof info.step_init_ms !== "undefined") stepInitMs = info.step_init_ms;
+
+            totalLeftWhiteMs = totalInitMs;
+            totalLeftBlackMs = totalInitMs;
+            stepLeftWhiteMs = stepInitMs;
+            stepLeftBlackMs = stepInitMs;
+            timeoutSent = false;
+            stopClock();
+            renderTimePanel();
+            return;
+          }
+
+          if (info.optype === "rematch_invite") {
+            if (!roomInfo) roomInfo = {};
+            if (typeof info.white_id !== "undefined") roomInfo.white_id = info.white_id;
+            if (typeof info.black_id !== "undefined") roomInfo.black_id = info.black_id;
+            if (typeof info.white_username !== "undefined") roomInfo.white_username = info.white_username;
+            if (typeof info.black_username !== "undefined") roomInfo.black_username = info.black_username;
+            showRematchPanel(info.inviter_uid || 0);
+            return;
+          }
+
+          if (info.optype === "rematch_start") {
+            applyRematchStart(info, false);
+            return;
+          }
+
+          if (info.optype === "put_chess") { // 落子
+            handlePutChess(info);
+            return;
+          }
+
+          if (info.optype === "chat") { // 聊天
+            appendChat(info.message || "", info.uid === roomInfo.uid);
+            return;
+          }
+
+          if (info.optype === "timeout") {
+            status = "over";
+            stopClock();
+            timeoutSent = true;
+            clearLastHighlight();
+            if (roomInfo && info.winner === roomInfo.uid) {
+              setScreenResult("win");
+              screen.textContent = "你获胜了！";
+            } else {
+              setScreenResult("lose");
+              screen.textContent = "你失败了！";
+            }
+            showRematchInviteStarter();
+            renderTimePanel();
+            return;
+          }
+
+          if (info.optype === "peer_left_room") {
+            status = "over";
+            stopClock();
+            timeoutSent = true;
+            clearLastHighlight();
+            setScreenResult(null);
+            alert(info.reason || "对方已退出房间");
+            screen.textContent = info.reason || "对方已退出房间";
+            showRematchInviteStarter();
+          }
+        };
+      }
+    }
+
+    window.onbeforeunload = () => { // 页面关闭事件
+      if (ws) ws.close();
+    };
+
+    drawBoard(); // 绘制棋盘
+    initSocket(); // 初始化 WebSocket 连接  
+
+    // #region agent log
+    fetch(LOG_INGEST_FULL_URL,{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'a02d2a'},body:JSON.stringify({sessionId:'a02d2a',runId:'iter1',hypothesisId:'lm-log-entry',location:'game_room.html:onload',message:'page onload debug log',data:{isSpectator,room_id:location.search},timestamp:Date.now()})}).catch(()=>{});
+    // #endregion
+  </script>
+</body>
+
+</html>

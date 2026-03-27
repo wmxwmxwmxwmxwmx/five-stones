@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>登录 - 五子棋</title>
+  <style>
+    :root {
+      --bg0: #050817;
+      --bg1: #070b1f;
+      --card: rgba(11, 18, 41, 0.62);
+      --card2: rgba(4, 10, 30, 0.48);
+      --text: rgba(236, 245, 255, 0.92);
+      --muted: rgba(236, 245, 255, 0.7);
+      --cyan: #2efcff;
+      --magenta: #ff4fd8;
+      --violet: #7c5cff;
+      --shadow: 0 0 24px rgba(46, 252, 255, 0.16);
+      --shadow2: 0 0 40px rgba(255, 79, 216, 0.12);
+      --radius: 16px;
+      --radius2: 12px;
+    }
+
+    body {
+      font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+      max-width: 520px;
+      margin: 0 auto;
+      padding: 44px 18px;
+      color: var(--text);
+      min-height: 100vh;
+      background:
+        radial-gradient(900px 600px at 10% 0%, rgba(46, 252, 255, 0.22), transparent 60%),
+        radial-gradient(800px 520px at 95% 10%, rgba(255, 79, 216, 0.18), transparent 55%),
+        radial-gradient(700px 520px at 50% 110%, rgba(124, 92, 255, 0.12), transparent 55%),
+        linear-gradient(180deg, var(--bg0), var(--bg1));
+    }
+
+    body::before {
+      content: "";
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      background-image:
+        linear-gradient(rgba(255, 255, 255, 0.03) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255, 255, 255, 0.02) 1px, transparent 1px);
+      background-size: 46px 46px, 46px 46px;
+      opacity: 0.25;
+    }
+
+    h2 {
+      text-align: center;
+      margin: 0 0 18px;
+      letter-spacing: 0.5px;
+      text-shadow: 0 0 18px rgba(46, 252, 255, 0.18);
+    }
+
+    .card {
+      padding: 18px 18px 16px;
+      border-radius: var(--radius);
+      background: linear-gradient(180deg, var(--card), var(--card2));
+      border: 1px solid rgba(46, 252, 255, 0.22);
+      box-shadow: var(--shadow), var(--shadow2);
+      backdrop-filter: blur(10px);
+    }
+
+    .row { margin: 12px 0; }
+    input {
+      width: 100%;
+      padding: 10px 12px;
+      box-sizing: border-box;
+      border-radius: var(--radius2);
+      border: 1px solid rgba(255, 79, 216, 0.22);
+      background: rgba(0, 0, 0, 0.12);
+      color: var(--text);
+      transition: border-color 180ms ease, box-shadow 180ms ease;
+    }
+
+    input::placeholder { color: rgba(236, 245, 255, 0.4); }
+
+    button {
+      width: 100%;
+      padding: 12px 14px;
+      cursor: pointer;
+      border-radius: var(--radius2);
+      border: 1px solid rgba(46, 252, 255, 0.35);
+      background: linear-gradient(135deg, rgba(46, 252, 255, 0.18), rgba(255, 79, 216, 0.12));
+      color: var(--text);
+      box-shadow: 0 0 0 1px rgba(46, 252, 255, 0.08), var(--shadow);
+      transition: transform 120ms ease, box-shadow 180ms ease, border-color 180ms ease;
+    }
+
+    button:hover {
+      transform: translateY(-1px);
+      border-color: rgba(46, 252, 255, 0.65);
+      box-shadow: 0 0 0 1px rgba(46, 252, 255, 0.16), 0 0 34px rgba(46, 252, 255, 0.18);
+    }
+
+    button:active { transform: translateY(0px); }
+
+    input:focus-visible,
+    button:focus-visible {
+      outline: 2px solid rgba(255, 79, 216, 0.65);
+      outline-offset: 2px;
+    }
+
+    a { color: rgba(46, 252, 255, 0.95); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+  </style>
+</head>
+<body>
+  <h2>用户登录</h2>
+  <div class="card">
+    <div class="row">
+      <label>用户名</label>
+      <input id="username" type="text" />
+    </div>
+    <div class="row">
+      <label>密码</label>
+      <input id="password" type="password" />
+    </div>
+    <div class="row">
+      <button id="submit">登录</button>
+    </div>
+    <div><a href="/register.html">没有账号？去注册</a></div>
+  </div>
+
+  <script>
+    async function login() {
+      const username = document.getElementById("username").value.trim();// 获取用户名（去掉前后空格）
+      const password = document.getElementById("password").value;// 获取密码
+      if (!username || !password) {// 用户名或密码为空
+        alert("请输入用户名和密码");// 提示用户输入用户名和密码
+        return;
+      }
+      try {// 尝试登录
+        const resp = await fetch("/login", {// 发送登录请求
+          method: "POST",// 请求方法
+          headers: { "Content-Type": "application/json" },// 请求头
+          body: JSON.stringify({ username, password })// 请求体
+        });
+        const data = await resp.json();// 读服务器返回的 JSON
+        alert(data.reason || (data.result ? "登录成功" : "登录失败"));// 用弹窗告诉用户结果
+        if (resp.ok && data.result) {// 若 HTTP 和业务都成功就自动去游戏大厅页
+          location.assign("/game_hall.html");
+        }
+      } catch (e) {// 登录请求失败
+        alert("登录请求失败: " + e);
+      }
+    }
+
+    document.getElementById("submit").onclick = login;// 登录按钮点击事件 
+  </script>
+</body>
+</html>
+

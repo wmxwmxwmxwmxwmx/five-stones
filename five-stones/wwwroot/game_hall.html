@@ -1,0 +1,258 @@
+<!doctype html>
+<html lang="zh-CN">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>游戏大厅 - 五子棋</title>
+  <style>
+    :root {
+      --bg0: #050817;
+      --bg1: #0b1229;
+      --card: rgba(11, 18, 41, 0.62);
+      --card2: rgba(4, 10, 30, 0.5);
+      --text: rgba(236, 245, 255, 0.92);
+      --muted: rgba(236, 245, 255, 0.7);
+      --line: rgba(122, 255, 255, 0.28);
+      --cyan: #2efcff;
+      --magenta: #ff4fd8;
+      --violet: #7c5cff;
+      --gold: #ffd36e;
+      --shadow: 0 0 24px rgba(46, 252, 255, 0.16);
+      --shadow2: 0 0 40px rgba(255, 79, 216, 0.12);
+      --radius: 14px;
+      --radius2: 10px;
+    }
+
+    body {
+      font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+      max-width: 720px;
+      margin: 24px auto;
+      color: var(--text);
+      min-height: 100vh;
+      background:
+        radial-gradient(900px 600px at 10% 0%, rgba(46, 252, 255, 0.22), transparent 60%),
+        radial-gradient(800px 520px at 95% 10%, rgba(255, 79, 216, 0.18), transparent 55%),
+        radial-gradient(700px 520px at 50% 110%, rgba(124, 92, 255, 0.12), transparent 55%),
+        linear-gradient(180deg, var(--bg0), var(--bg1));
+    }
+
+    /* 轻微“噪点”层，纯 CSS */
+    body::before {
+      content: "";
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      background-image:
+        linear-gradient(rgba(255, 255, 255, 0.03) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255, 255, 255, 0.02) 1px, transparent 1px);
+      background-size: 46px 46px, 46px 46px;
+      opacity: 0.25;
+    }
+
+    #panel {
+      position: relative;
+      border-radius: var(--radius);
+      padding: 16px;
+      background: linear-gradient(180deg, var(--card), var(--card2));
+      border: 1px solid rgba(46, 252, 255, 0.26);
+      box-shadow: var(--shadow), var(--shadow2);
+      backdrop-filter: blur(10px);
+    }
+
+    #screen {
+      margin-bottom: 16px;
+      line-height: 1.8;
+      color: var(--muted);
+    }
+
+    #match {
+      padding: 10px 16px;
+      cursor: pointer;
+      width: 100%;
+      border-radius: var(--radius2);
+      border: 1px solid rgba(46, 252, 255, 0.35);
+      background:
+        linear-gradient(135deg, rgba(46, 252, 255, 0.18), rgba(255, 79, 216, 0.12));
+      color: var(--text);
+      box-shadow: 0 0 0 rgba(46, 252, 255, 0.0);
+      transition: transform 120ms ease, box-shadow 180ms ease, border-color 180ms ease;
+    }
+
+    #log {
+      margin-top: 16px;
+      color: rgba(236, 245, 255, 0.68);
+      font-size: 13px;
+      white-space: pre-wrap;
+      border-radius: 12px;
+      padding: 10px 12px;
+      background: rgba(0, 0, 0, 0.14);
+      border: 1px solid rgba(255, 79, 216, 0.18);
+    }
+
+    #roomsPanel {
+      margin-top: 16px;
+      border-top: 1px dashed rgba(122, 255, 255, 0.22);
+      padding-top: 12px;
+    }
+
+    #rooms {
+      margin-top: 8px;
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 8px;
+    }
+
+    .roomBtn {
+      padding: 6px 10px;
+      cursor: pointer;
+      border: 1px solid rgba(46, 252, 255, 0.22);
+      border-radius: 12px;
+      background: rgba(0, 0, 0, 0.12);
+      color: var(--text);
+      text-align: left;
+      transition: transform 120ms ease, box-shadow 180ms ease, border-color 180ms ease;
+      box-shadow: 0 0 0 rgba(46, 252, 255, 0.0);
+    }
+
+    #match:hover,
+    .roomBtn:hover {
+      transform: translateY(-1px);
+      border-color: rgba(46, 252, 255, 0.6);
+      box-shadow: 0 0 0 1px rgba(46, 252, 255, 0.18), 0 0 26px rgba(46, 252, 255, 0.14);
+    }
+
+    #match:active,
+    .roomBtn:active {
+      transform: translateY(0px);
+    }
+
+    #match:focus-visible,
+    .roomBtn:focus-visible {
+      outline: 2px solid rgba(255, 79, 216, 0.65);
+      outline-offset: 2px;
+    }
+  </style>
+</head>
+
+<body>
+  <h2>游戏大厅</h2>
+  <div id="panel">
+    <div id="screen">正在加载用户信息...</div>
+    <button id="match">开始匹配</button>
+    <div id="roomsPanel">
+      <div>进行中房间：</div>
+      <div id="rooms"></div>
+    </div>
+    <div id="log"></div>
+  </div>
+
+  <script>
+    let ws = null;// 大厅连接（用来保存大厅 WebSocket 对象）
+    let matching = false;// 是否正在匹配（用来判断是否需要显示“取消匹配”按钮）
+
+    const screen = document.getElementById("screen");// 用户信息显示区域（用来显示用户信息）
+    const logBox = document.getElementById("log");// 日志显示区域（用来显示日志）
+    const matchBtn = document.getElementById("match");// 匹配按钮（用来开始/取消匹配）
+    const roomsBox = document.getElementById("rooms");// 房间列表
+
+    function log(msg) {// 记录日志
+      logBox.textContent = msg + "\n" + logBox.textContent;
+    }
+    function setMatchButtonState() {// 设置匹配按钮状态
+      matchBtn.textContent = matching ? "匹配中，点击取消" : "开始匹配";
+    }
+    async function loadUserInfo() {// 加载用户信息
+      const resp = await fetch("/info");// 发送获取用户信息请求
+      if (!resp.ok) throw new Error("未登录或会话失效");// 若请求失败则抛出错误
+      const data = await resp.json();// 读服务器返回的 JSON
+      screen.innerHTML =
+        "用户：" + data.username + " 积分：" + data.score +
+        "<br>比赛场次：" + data.total_count + " 获胜场次：" + data.win_count;
+    }
+    function buildWsUrl(path) {
+      const wsProtocol = location.protocol === "https:" ? "wss:" : "ws:";
+      return wsProtocol + "//" + location.host + path;
+    }
+    function initHallSocket() {// 初始化大厅连接
+      ws = new WebSocket(buildWsUrl("/hall"));// 创建大厅 WebSocket 对象
+      ws.onopen = () => log("大厅连接已建立");// 大厅连接建立成功
+      ws.onclose = () => log("大厅连接已关闭");// 大厅连接关闭
+      ws.onerror = () => log("大厅连接发生错误");// 大厅连接发生错误
+      ws.onmessage = (evt) => {// 处理服务器发送的消息
+        let rsp = {};// 服务器返回的 JSON
+        try { rsp = JSON.parse(evt.data); } catch (_) { return; }
+
+        if (rsp.result === false) {// 若请求失败则弹出错误信息 并跳转到登录页 
+          alert(rsp.reason || "请求失败");// 弹出错误信息
+          location.replace("/login.html");// 跳转到登录页
+          return;
+        }
+        if (rsp.optype === "hall_ready") {// 大厅就绪
+          log("大厅就绪");
+        } else if (rsp.optype === "match_start") {// 开始匹配
+          matching = true;
+          setMatchButtonState();
+          log("已进入匹配队列");
+        } else if (rsp.optype === "match_stop") {
+          matching = false;
+          setMatchButtonState();
+          log("已退出匹配队列");
+        } else if (rsp.optype === "match_success") {
+          log("匹配成功，进入房间");
+          location.replace("/game_room.html");
+        } else if (rsp.optype === "room_list") {
+          const rooms = rsp.rooms || [];
+          renderRooms(rooms);
+        }
+      };
+    }
+
+    function renderRooms(rooms) {
+      if (!roomsBox) return;
+      roomsBox.innerHTML = "";
+      for (const r of rooms) {
+        const btn = document.createElement("button");
+        btn.className = "roomBtn";
+        const whiteName = r.white_username || r.white_id;
+        const blackName = r.black_username || r.black_id;
+        btn.textContent = `房间${r.room_id}（黑（${blackName}）：白（${whiteName}））`;
+        btn.onclick = () => {
+          location.replace(`/game_room.html?spectate=1&room_id=${r.room_id}`);
+        };
+        roomsBox.appendChild(btn);
+      }
+    }
+
+    matchBtn.onclick = () => {
+      if (!ws || ws.readyState !== WebSocket.OPEN) {
+        alert("大厅连接未就绪");
+        return;
+      }
+      const payload = { optype: matching ? "match_stop" : "match_start" };
+      ws.send(JSON.stringify(payload));
+    };
+
+    window.onbeforeunload = () => {
+      if (ws) ws.close();
+    };
+
+    (async function boot() {
+      try {
+        await loadUserInfo();// 加载用户信息
+        setMatchButtonState();// 设置匹配按钮状态
+        initHallSocket();// 初始化大厅连接
+        // 定时拉取房间列表，用于观战入口
+        setInterval(() => {
+          if (!ws || ws.readyState !== WebSocket.OPEN) return;
+          ws.send(JSON.stringify({ optype: "room_list_request" }));
+        }, 2000);
+      } catch (e) {
+        alert("请先登录");// 弹出错误信息
+        location.replace("/login.html");// 跳转到登录页
+      }
+    })();// 启动大厅 页面加载时执行 （异步函数）
+  </script>
+</body>
+
+</html>
