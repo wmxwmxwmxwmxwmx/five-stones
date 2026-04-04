@@ -20,7 +20,9 @@ typedef websocketpp::lib::shared_ptr<websocketpp::lib::asio::steady_timer> timer
 #include <cstdint>
 #include <string>
 
+#ifndef WWWROOT
 #define WWWROOT "./wwwroot/"
+#endif
 
 // 五子棋服务器（HTTP + WebSocket）
 class gobang_server

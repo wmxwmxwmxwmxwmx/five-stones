@@ -1,0 +1,31 @@
+# CMake / 构建目录
+build/
+cmake-build-*/
+out/
+.vscode/
+.cursor/
+
+# 误在源码树内执行 cmake 时产生的文件
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+install_manifest.txt
+CTestTestfile.cmake
+_deps/
+
+# 编译产物
+*.o
+*.a
+*.so
+*.dylib
+
+# 可执行文件（若生成在仓库根）
+/gobang_server
+
+# 根目录下由 build 链出的 clangd 符号链接（可选）
+/compile_commands.json
+
+# 编辑器与系统
+*~
+*.swp
+.DS_Store
