@@ -13,6 +13,7 @@
 - **网络与并发**：WebSocket++（ASIO）、STL 线程库（`thread/mutex/condition_variable`）
 - **数据与序列化**：MySQL C API（`libmysqlclient`）、JsonCpp
 - **构建**：CMake 3.16+，生成单目标可执行文件 `gobang_server`；顶层 [`CMakeLists.txt`](CMakeLists.txt) 含 `project()`，**必须在仓库根目录**作为 `-S` 源码树配置（子目录 [`five-stones/CMakeLists.txt`](five-stones/CMakeLists.txt) 仅 `add_executable`，不能单独当作工程根）
+- **测试**：GoogleTest（`BUILD_TESTING` 默认开启；若系统已安装可被 `find_package` 找到的 GTest，则不再下载；否则通过 FetchContent 拉取，见下文）
 
 ### 技术亮点
 - **事件驱动 + URI 路由分发**：基于 WebSocket++ 的事件循环统一接入 HTTP 与 WebSocket，按 URI（`/hall`、`/room`、`/spectate`）分发到不同业务处理函数（见 `five-stones/include/server.hpp`）。
@@ -75,6 +76,46 @@ cmake --build build -j
 
 可执行文件默认输出到 **`build/gobang_server`**（由子目录 `five-stones/CMakeLists.txt` 中 `RUNTIME_OUTPUT_DIRECTORY` 指定）。
 
+#### 单元测试（GoogleTest + CTest）
+
+默认会构建测试目标 `five_stones_tests`（源码在 [`tests/`](tests/)）。**当前用例覆盖三类**：**并发/压力**（[`stress_concurrency_test.cc`](tests/stress_concurrency_test.cc)：`match_queue` 多生产者、`wait` 唤醒、`session_manager` 并发创建/并发读）、**异常/边界**（[`boundary_exception_test.cc`](tests/boundary_exception_test.cc)：`json_util`/`string_util` 非法或边界输入、`match_queue` 空 `pop`、`session` 非法 ssid 等），以及 **MySQL 并发压测**（[`mysql_concurrency_stress_test.cc`](tests/mysql_concurrency_stress_test.cc)：默认连接与 `main.cc` 相同，本机无 MySQL 或连不上时 4 条用例 **SKIP**，见下文）。不含 HTTP/端到端脚本；高负载单线程用例 `Stress.DISABLED_MatchQueuePushPopSingleThreaded` 默认禁用，本地可去掉 `DISABLED_` 运行。
+
+**必须在仓库根目录**配置（含 `project()` 的顶层 [`CMakeLists.txt`](CMakeLists.txt)），勿在 `tests/` 下单独执行 `cmake ..`。
+
+```bash
+cmake -S . -B build
+cmake --build build -j
+ctest --test-dir build --output-on-failure
+```
+
+也可直接运行 `build/tests/five_stones_tests`（路径随生成器可能略有不同）。测试目标通过 `-include tests/wsserver_for_tests.h` 注入 `wsserver_t` 定义，以便编译 [`session.hpp`](five-stones/include/session.hpp)。
+
+#### MySQL 并发压测
+
+默认**无需设置环境变量**：连接参数与 [`five-stones/src/main.cc`](five-stones/src/main.cc) 一致（`127.0.0.1`、`wmx`、`123456`、`online_gobang`、`3306`）。直接运行 `ctest` 或 `build/tests/five_stones_tests` 时，若 MySQL 可达且存在 `user` 表，则 4 条用例会**真正执行**；若连不上则 **SKIPPED**，整体仍算通过。
+
+可选：用环境变量覆盖连接或压测规模（无需 `RUN_MYSQL_STRESS`）：
+
+```bash
+export MYSQL_HOST=127.0.0.1
+export MYSQL_USER=你的用户
+export MYSQL_PASSWORD=你的密码
+export MYSQL_DATABASE=online_gobang_test
+# 可选：MYSQL_PORT、STRESS_THREADS（默认 16，上限 512）、STRESS_ITERS（默认 100，上限 100000）
+ctest --test-dir build --output-on-failure
+```
+
+**建议**在独立测试库上跑压测；若使用与线上一致的库名，用例仅删除 `username LIKE 'fstress%'` 的行，但仍需谨慎。`user_table` 为单连接且对部分 API 加锁，**insert 等路径未加锁**；压测用于观察多线程下的稳定性与可调参吞吐。
+
+- **关闭测试**（跳过 GTest 与 `tests/` 子目录，适合仅需发布的构建）：配置时加 `-DBUILD_TESTING=OFF`。
+- **拉取 googletest**：若未通过 `find_package(GTest)` 找到系统包，CMake 会使用 FetchContent 从 Git 克隆（默认仓库为 GitHub，**需要能访问外网或代理**）。若无法访问 GitHub，可在首次配置时指定镜像，例如：
+
+```bash
+cmake -S . -B build -DFIVE_STONES_GOOGLETEST_REPOSITORY=https://gitee.com/mirrors/googletest.git
+```
+
+- **使用系统 GTest**（可选）：安装发行版提供的 GTest 开发包并能被 CMake 找到后，将优先使用系统库，无需克隆（具体包名因发行版而异，例如部分环境为 `libgtest-dev`）。
+
 #### VS Code / Cursor（CMake Tools）
 
 工作区已包含 [`.vscode/settings.json`](.vscode/settings.json)：将 `cmake.sourceDirectory` 指向仓库根，并在 Linux 上使用 **Unix Makefiles** 与 `CMAKE_MAKE_PROGRAM=/usr/bin/make`，避免误用子目录为 CMake 根目录、或全局设置里残留的 Windows/Qt Ninja 路径导致配置失败。若你在其他机器上仍遇到类似问题，请在**用户设置**（含 Remote-SSH 的远程设置）中检查 `cmake.cmakePath`、`cmake.generator`、`cmake.configureSettings` 是否含有 `D:\...` 等无效路径。
@@ -97,7 +138,9 @@ cmake --build build -j
 
 ## 目录结构
 - [`.gitignore`](.gitignore)：忽略 `build/`、常见 CMake 缓存与本地编译产物等
-- `CMakeLists.txt`：顶层工程，`project()`、`add_subdirectory(five-stones)`
+- `CMakeLists.txt`：顶层工程，`project()`、`add_subdirectory(five-stones)`、`BUILD_TESTING` 时 `add_subdirectory(tests)`
+- `tests/`：GoogleTest（[`tests/CMakeLists.txt`](tests/CMakeLists.txt)、[`stress_concurrency_test.cc`](tests/stress_concurrency_test.cc)、[`boundary_exception_test.cc`](tests/boundary_exception_test.cc)、[`mysql_concurrency_stress_test.cc`](tests/mysql_concurrency_stress_test.cc)、[`wsserver_for_tests.h`](tests/wsserver_for_tests.h)）
+- `five-stones/include/match_queue.hpp`：匹配队列模板（由 [`match.hpp`](five-stones/include/match.hpp) 包含，供并发单测直接使用）
 - `.vscode/settings.json`（可选提交）：CMake Tools 在本仓库下的源码目录与生成器约定
 - `five-stones/CMakeLists.txt`：目标 `gobang_server`、包含路径、`WWWROOT` 宏、链接库
 - `five-stones/src/main.cc`：程序入口，构造 `gobang_server` 并 `start(port)`

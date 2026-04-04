@@ -45,6 +45,7 @@ public:
         char sql[4096] = {0};
         sprintf(sql, INSERT_USER, user["username"].asCString(), user["password"].asCString());
 
+        std::unique_lock<std::mutex> lock(_mutex);
         bool ret = mysql_util::mysql_exec(_mysql, sql);
         if (ret == false)
         {
@@ -210,6 +211,7 @@ public:
         char sql[4096] = {0};
         sprintf(sql, USER_WIN, (unsigned long long)id);
 
+        std::unique_lock<std::mutex> lock(_mutex);
         bool ret = mysql_util::mysql_exec(_mysql, sql);
         if (ret == false)
         {
@@ -228,6 +230,7 @@ public:
         char sql[4096] = {0};
         sprintf(sql, USER_LOSE, (unsigned long long)id);
 
+        std::unique_lock<std::mutex> lock(_mutex);
         bool ret = mysql_util::mysql_exec(_mysql, sql);
         if (ret == false)
         {

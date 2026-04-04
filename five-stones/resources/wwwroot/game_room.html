@@ -336,9 +336,6 @@
     let activeThinkingUid = 0; // 观战端：当前正在思考的玩家 uid（用于递减对应局时）
     let lastHighlight = null; // { row, col }：仅玩家端，用于高亮对方最后一步
     let rematchInviterUid = 0; // 邀请方 uid（仅 UI 状态使用）
-    const LOG_INGEST_FULL_URL =
-      ((location.protocol === "https:") ? "https://localhost:7285/ingest/" : "http://localhost:7285/ingest/") +
-      "4c312b70-2715-49f1-839e-eb92aebc1cdd";
 
     function pad2(n) {
       return String(n).padStart(2, "0");
@@ -500,10 +497,6 @@
       ctx.shadowBlur = 14;
       ctx.stroke();
       ctx.restore();
-
-      // #region agent log
-      fetch(LOG_INGEST_FULL_URL,{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'a02d2a'},body:JSON.stringify({sessionId:'a02d2a',runId:'pre-fix',hypothesisId:'lm-highlight-stale',location:'game_room.html:drawMoveHighlight',message:'drawMoveHighlight',data:{row,col,lastHighlight:lastHighlight?{row:lastHighlight.row,col:lastHighlight.col}:null},timestamp:Date.now()})}).catch(()=>{});
-      // #endregion
     }
 
     function clearLastHighlight() {
@@ -512,18 +505,10 @@
       const isWhite = board[row][col] === 1;
       // 重新绘制棋子即可移除外环（因为外环不会在 drawPiece 中重复绘制）
 
-      // #region agent log
-      fetch(LOG_INGEST_FULL_URL,{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'a02d2a'},body:JSON.stringify({sessionId:'a02d2a',runId:'pre-fix',hypothesisId:'lm-highlight-erase',location:'game_room.html:clearLastHighlight',message:'clearLastHighlight begin',data:{row,col,boardVal:board[row][col],isWhite,lastHighlightBefore:{row,col}},timestamp:Date.now()})}).catch(()=>{});
-      // #endregion
-
       // 清空+重绘整个画布，确保旧的外环/glow 没有残留像素
       lastHighlight = null;
       redrawAllPieces();
       lastHighlight = null;
-
-      // #region agent log
-      fetch(LOG_INGEST_FULL_URL,{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'a02d2a'},body:JSON.stringify({sessionId:'a02d2a',runId:'pre-fix',hypothesisId:'lm-highlight-erase',location:'game_room.html:clearLastHighlight',message:'clearLastHighlight end',data:{lastHighlight:lastHighlight},timestamp:Date.now()})}).catch(()=>{});
-      // #endregion
     }
 
     function appendChat(msg, isSelf) { // 添加聊天消息
@@ -677,10 +662,6 @@
         if (!isSpectator) {
           // 移除上一手高亮，再按“轮到我时”决定是否高亮本手
 
-          // #region agent log
-          fetch(LOG_INGEST_FULL_URL,{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'a02d2a'},body:JSON.stringify({sessionId:'a02d2a',runId:'pre-fix',hypothesisId:'lm-highlight-flow',location:'game_room.html:handlePutChess',message:'before clear/draw highlight',data:{uid,row,col,isWhite,myTurnBefore:myTurn,lastHighlightBefore:lastHighlight?{row:lastHighlight.row,col:lastHighlight.col}:null},timestamp:Date.now()})}).catch(()=>{});
-          // #endregion
-
           // 不依赖 lastHighlight 状态，先把棋盘/棋子整体重绘一次，确保历史外环像素不残留
           lastHighlight = null;
           redrawAllPieces();
@@ -690,9 +671,6 @@
             lastHighlight = { row, col };
           }
 
-          // #region agent log
-          fetch(LOG_INGEST_FULL_URL,{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'a02d2a'},body:JSON.stringify({sessionId:'a02d2a',runId:'pre-fix',hypothesisId:'lm-highlight-flow',location:'game_room.html:handlePutChess',message:'after clear/draw highlight',data:{myTurn,lastHighlightAfter:lastHighlight?{row:lastHighlight.row,col:lastHighlight.col}:null},timestamp:Date.now()})}).catch(()=>{});
-          // #endregion
           screen.textContent = myTurn ? "轮到你落子" : "等待对方落子";
         }
         // refreshTurnText();
@@ -1025,10 +1003,6 @@
 
     drawBoard(); // 绘制棋盘
     initSocket(); // 初始化 WebSocket 连接  
-
-    // #region agent log
-    fetch(LOG_INGEST_FULL_URL,{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'a02d2a'},body:JSON.stringify({sessionId:'a02d2a',runId:'iter1',hypothesisId:'lm-log-entry',location:'game_room.html:onload',message:'page onload debug log',data:{isSpectator,room_id:location.search},timestamp:Date.now()})}).catch(()=>{});
-    // #endregion
   </script>
 </body>
 

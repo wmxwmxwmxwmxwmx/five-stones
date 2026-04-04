@@ -1,85 +1,15 @@
 #ifndef FIVE_STONES_MATCHER_HPP
 #define FIVE_STONES_MATCHER_HPP
 
+#include "match_queue.hpp"
 #include "util.hpp"
 #include "online.hpp"
 #include "db.hpp"
 #include "room.hpp"
 
 #include <atomic>
-#include <condition_variable>
 #include <cstdint>
-#include <list>
-#include <mutex>
 #include <thread>
-
-template <class T>
-class match_queue
-{
-private:
-    // 用链表而不直接使用 queue，是因为有中间删除数据的需要
-    std::list<T> _list;
-    std::mutex _mutex;             // 实现线程安全
-    std::condition_variable _cond; // 主要为了阻塞消费者，后边使用的时候：队列中元素个数<2则阻塞
-
-public:
-    // 获取队列元素个数
-    int size()
-    {
-        std::unique_lock<std::mutex> lock(_mutex);
-        return static_cast<int>(_list.size());
-    }
-
-    // 判断队列是否为空
-    bool empty()
-    {
-        std::unique_lock<std::mutex> lock(_mutex);
-        return _list.empty();
-    }
-
-    // 阻塞等待（队列人数不足时供匹配线程等待）
-    void wait()
-    {
-        std::unique_lock<std::mutex> lock(_mutex);
-        // _cond.wait(lock);
-        // 使用谓词避免“先 notify 后 wait”导致的丢唤醒
-        _cond.wait(lock, [this]()
-                   { return _list.size() >= 2; });
-        //    如果 wait() 是不带谓词版本，就会出现这个竞态窗口：
-        //    1.匹配线程执行 mq.size()，看到只有 1 人，准备去 wait
-        //    2.在它真正 wait 前，第二个同分玩家 push 进队列并 notify_all
-        //    3.因为此时匹配线程还没睡，这次通知“打空”
-        //    4.接着匹配线程调用无谓词 wait，直接睡下去
-        //    5.队列其实已是 2 人，但没有新通知了，于是这俩人卡住，匹配不成功（常要等第三人触发下一次 notify 才恢复）
-        //    这就是你看到“两个同分的人不能成功匹配”的最常见原因
-    }
-
-    // 入队数据，并唤醒线程
-    void push(const T &data)
-    {
-        std::unique_lock<std::mutex> lock(_mutex);
-        _list.push_back(data);
-        _cond.notify_all(); // 唤醒所有等待的线程
-    }
-
-    // 出队数据
-    bool pop(T &data)
-    {
-        std::unique_lock<std::mutex> lock(_mutex);
-        if (_list.empty())
-            return false;     // 队列为空，返回false
-        data = _list.front(); // 队列不为空，取出队列头元素
-        _list.pop_front();
-        return true; // 队列不为空，取出队列头元素成功，返回true
-    }
-
-    // 移除指定的数据
-    void remove(const T &data)
-    {
-        std::unique_lock<std::mutex> lock(_mutex);
-        _list.remove(data); // 移除指定的数据
-    }
-};
 
 class matcher
 {

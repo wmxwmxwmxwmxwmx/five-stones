@@ -30,12 +30,12 @@ public:
     session(uint64_t ssid)
         : _ssid(ssid), _uid(0), _statu(UNLOGIN), _tp()
     {
-        DBG_LOG("SESSION %p 被创建！！", static_cast<void *>(this));
+        //DBG_LOG("SESSION %p 被创建！！", static_cast<void *>(this));
     }
 
     ~session()
     {
-        DBG_LOG("SESSION %p 被释放！！", static_cast<void *>(this));
+        //DBG_LOG("SESSION %p 被释放！！", static_cast<void *>(this));
     }
 
     uint64_t ssid() const { return _ssid; }

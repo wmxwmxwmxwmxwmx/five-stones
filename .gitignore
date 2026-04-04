@@ -2,8 +2,8 @@
 build/
 cmake-build-*/
 out/
-.vscode/
 .cursor/
+
 
 # 误在源码树内执行 cmake 时产生的文件
 CMakeCache.txt

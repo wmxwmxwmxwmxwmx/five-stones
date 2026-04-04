@@ -1,3 +1,7 @@
+if(POLICY CMP0167)
+    cmake_policy(SET CMP0167 NEW)
+endif()
+
 find_package(Threads REQUIRED)
 find_package(Boost REQUIRED COMPONENTS system)
 
