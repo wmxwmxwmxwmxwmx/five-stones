@@ -1,10 +1,10 @@
 #pragma once
 
+#include <cctype>
 #include <cstdio>
 #include <ctime>
 #include <pthread.h>
 #include <fstream>
-#include <iostream>
 #include <memory>
 #include <sstream>
 #include <string>
@@ -13,6 +13,27 @@
 #include <jsoncpp/json/json.h>
 #include "logger.hpp"
 
+namespace {
+
+// 仅取 SQL 首词（如 SELECT/INSERT），不记录完整语句，避免泄露数据。
+const char *mysql_sql_kind_token(const std::string &sql)
+{
+    static char buf[12];
+    size_t i = 0;
+    while (i < sql.size() && std::isspace(static_cast<unsigned char>(sql[i])))
+        ++i;
+    size_t j = 0;
+    while (i < sql.size() && j + 1 < sizeof(buf) &&
+           std::isalpha(static_cast<unsigned char>(sql[i])))
+    {
+        buf[j++] = static_cast<char>(
+            std::toupper(static_cast<unsigned char>(sql[i++])));
+    }
+    buf[j] = '\0';
+    return j > 0 ? buf : "UNKNOWN";
+}
+
+} // namespace
 
 // MySQL-API封装
 class mysql_util
@@ -58,8 +79,11 @@ public:
     {
         if (mysql_query(mysql, sql.c_str()) != 0)
         {
-            ERR_LOG("SQL: %s", sql.c_str());
-            ERR_LOG("ERR: %s", mysql_error(mysql));
+            const unsigned int errn = mysql_errno(mysql);
+            const char *const sqlst = mysql_sqlstate(mysql);
+            const char *const merr = mysql_error(mysql);
+            ERR_LOG("mysql_query failed kind=%s errno=%u sqlstate=%s msg=%s", mysql_sql_kind_token(sql), errn,
+                    sqlst != nullptr ? sqlst : "", merr != nullptr ? merr : "");
             return false;
         }
         return true;
@@ -142,7 +166,7 @@ public:
         file.open(filename.c_str(), std::ios::in | std::ios::binary);// 以二进制方式打开文件
         if (!file)
         {
-            std::cout << filename << " Open failed!" << std::endl;
+            ERR_LOG("file open failed: %s", filename.c_str());
             return false;
         }
 
@@ -151,7 +175,7 @@ public:
         std::streamsize size = file.tellg();// 获取文件指针当前位置，即文件大小
         if (size < 0)
         {
-            std::cout << filename << " Tellg failed!" << std::endl;
+            ERR_LOG("file tellg failed: %s", filename.c_str());
             return false;
         }
 
@@ -167,7 +191,7 @@ public:
         // 检查文件读取是否成功
         if (file.good() == false)
         {
-            std::cout << filename << " Read failed!" << std::endl;
+            ERR_LOG("file read failed: %s", filename.c_str());
             return false;
         }
         return true;

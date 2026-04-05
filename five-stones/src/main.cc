@@ -1,8 +1,8 @@
 #include "server.hpp"
+#include "logger.hpp"
 
 #include <cstdint>
 #include <exception>
-#include <iostream>
 #include <string>
 
 int main(int argc, char *argv[])
@@ -21,24 +21,24 @@ int main(int argc, char *argv[])
         server_port = std::stoi(argv[1]);
     else if (argc > 2)
     {
-        std::cerr << "Usage: " << argv[0] << " [server_port]" << std::endl;
+        ERR_LOG("Usage: %s [server_port]", argv[0]);
         return 1;
     }
 
     try
     {
         gobang_server server(db_host, db_user, db_pass, db_name, db_port);
-        std::cout << "gobang server starting on port: " << server_port << std::endl;
+        INF_LOG("gobang server starting on port: %d", server_port);
         server.start(server_port);
     }
     catch (const std::exception &e)
     {
-        std::cerr << "server fatal error: " << e.what() << std::endl;
+        ERR_LOG("server fatal error: %s", e.what());
         return 1;
     }
     catch (...)
     {
-        std::cerr << "server fatal error: unknown exception" << std::endl;
+        ERR_LOG("server fatal error: unknown exception");
         return 1;
     }
 

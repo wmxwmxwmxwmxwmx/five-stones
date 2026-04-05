@@ -76,6 +76,14 @@ cmake --build build -j
 
 可执行文件默认输出到 **`build/gobang_server`**（由子目录 `five-stones/CMakeLists.txt` 中 `RUNTIME_OUTPUT_DIRECTORY` 指定）。
 
+#### 日志（`LOG_LEVEL`）
+
+日志宏见 [`five-stones/include/logger.hpp`](five-stones/include/logger.hpp)：
+
+- 环境变量 **`LOG_LEVEL`**：`debug`（默认，未设置或无法解析时同 `debug`）/`info`/`error`，不区分大小写。仅当消息严重度不低于设定阈值时输出（`debug` 输出 DEBUG/INFO/ERROR，`info` 输出 INFO/ERROR，`error` 仅输出 ERROR）。
+- **生产建议**：`LOG_LEVEL=error`，减少噪音与错误路径以外的日志量。
+- **输出流**：**ERROR** 写入 **stderr**，DEBUG / INFO 写入 **stdout**，便于容器或采集侧按流分流。
+
 #### 单元测试（GoogleTest + CTest）
 
 默认会构建测试目标 `five_stones_tests`（源码在 [`tests/`](tests/)）。**当前用例覆盖三类**：**并发/压力**（[`stress_concurrency_test.cc`](tests/stress_concurrency_test.cc)：`match_queue` 多生产者、`wait` 唤醒、`session_manager` 并发创建/并发读）、**异常/边界**（[`boundary_exception_test.cc`](tests/boundary_exception_test.cc)：`json_util`/`string_util` 非法或边界输入、`match_queue` 空 `pop`、`session` 非法 ssid 等），以及 **MySQL 并发压测**（[`mysql_concurrency_stress_test.cc`](tests/mysql_concurrency_stress_test.cc)：默认连接与 `main.cc` 相同，本机无 MySQL 或连不上时 4 条用例 **SKIP**，见下文）。不含 HTTP/端到端脚本；高负载单线程用例 `Stress.DISABLED_MatchQueuePushPopSingleThreaded` 默认禁用，本地可去掉 `DISABLED_` 运行。

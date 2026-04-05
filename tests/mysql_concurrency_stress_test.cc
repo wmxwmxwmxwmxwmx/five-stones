@@ -28,8 +28,8 @@ struct MysqlStressCfg
     std::string pass = "123456";
     std::string db = "online_gobang";
     uint16_t port = 3306;
-    int stress_threads = 16;
-    int stress_iters = 100;
+    int stress_threads = 128;
+    int stress_iters = 500;
 
     bool valid = false;
 };
@@ -151,6 +151,7 @@ std::string make_username(int thread, int seq, uint64_t salt)
 } // namespace
 
 // 预插入固定种子用户后，多线程并发 login 同一账号，统计成功次数应等于 线程数×每线程迭代次数。
+//数据库里先放好一个固定账号后，很多线程同时、反复用同一组用户名/密码去 login，是否每次都能成功。
 TEST_F(MysqlStressFixture, MysqlConcurrentLogin)
 {
     constexpr const char *kSeedUser = "ft_lseed";
@@ -200,6 +201,7 @@ TEST_F(MysqlStressFixture, MysqlConcurrentLogin)
 }
 
 // 每线程若干次：insert 唯一用户再 select_by_name，校验 score==1000 且用户名一致；迭代数为 STRESS_ITERS/10 以控制行数。
+//多线程并发下，每个线程反复「插入新用户 → 按用户名查询」，插入和查询是否都成功，且查到的数据与插入一致。
 TEST_F(MysqlStressFixture, MysqlConcurrentInsertThenSelect)
 {
     const int threads = cfg_.stress_threads;
@@ -237,6 +239,7 @@ TEST_F(MysqlStressFixture, MysqlConcurrentInsertThenSelect)
 }
 
 // 偶数下标线程反复 login 种子用户，奇数下标线程 insert+select 新用户；验证读写交织下计数与预期一致。
+//多线程并发下，一半线程反复「登录固定账号」，另一半线程反复「插入新用户 → 按用户名查询」，登录和插入查询是否都成功，且查到的数据与插入一致。
 TEST_F(MysqlStressFixture, MysqlMixedReadWrite)
 {
     constexpr const char *kSeedUser = "ft_mseed";
@@ -307,6 +310,7 @@ TEST_F(MysqlStressFixture, MysqlMixedReadWrite)
 }
 
 // 综合压测：每轮 insert → select_by_name → login，累计成功操作数应为 线程数×迭代×2，总耗时软限制 120s。
+//多线程并发下，每个线程反复「插入新用户 → 按用户名查询 → 登录」，插入、查询和登录是否都成功，且查到的数据与插入一致。
 TEST_F(MysqlStressFixture, MysqlStressRamp)
 {
     const int threads = cfg_.stress_threads;

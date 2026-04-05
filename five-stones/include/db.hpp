@@ -38,7 +38,7 @@ public:
 
         if (user["password"].isNull() || user["username"].isNull())// 用户名或密码不能为空
         {
-            DBG_LOG("INPUT PASSWORD OR USERNAME");
+            DBG_LOG("login/register: username or password empty");
             return false;
         }
 
@@ -61,7 +61,7 @@ public:
     {
         if (user["password"].isNull() || user["username"].isNull())// 用户名或密码不能为空
         {
-            DBG_LOG("INPUT PASSWORD OR USERNAME");
+            DBG_LOG("login/register: username or password empty");
             return false;
         }
 
