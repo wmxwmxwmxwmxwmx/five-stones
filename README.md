@@ -4,32 +4,38 @@
 基于 **Linux/C++** 开发的实时对战后端，提供**登录鉴权**、**大厅匹配**、**房间对局**、**观战同步**与**战绩落库**等功能，完成 **HTTP + WebSocket** 一体化通信闭环。
 
 核心功能：
-- **HTTP**：静态资源服务（源码树内 `five-stones/resources/wwwroot/`，CMake 通过宏 `WWWROOT` 指向绝对路径），注册/登录/用户信息接口
-- **WebSocket**：大厅（`/hall`）匹配与房间列表，房间（`/room`）对局消息，观战（`/spectate`）快照与同步
+- **HTTP**：静态资源（源码树内 `five-stones/resources/wwwroot/`，CMake 通过宏 `WWWROOT` 注入绝对路径）、注册/登录/用户信息接口
+- **WebSocket**：大厅 `/hall` 匹配与房间列表，房间 `/room` 对局消息，观战 `/spectate` 快照与同步
 - **数据落库**：MySQL 用户与战绩（积分、总局数、胜局数）
 
 ### 技术栈
 - **语言/平台**：C++17、Linux
-- **网络与并发**：WebSocket++（ASIO）、STL 线程库（`thread/mutex/condition_variable`）
+- **网络与并发**：WebSocket++（ASIO）、STL 线程与同步原语
 - **数据与序列化**：MySQL C API（`libmysqlclient`）、JsonCpp
-- **构建**：CMake 3.16+，生成单目标可执行文件 `gobang_server`；顶层 [`CMakeLists.txt`](CMakeLists.txt) 含 `project()`，**必须在仓库根目录**作为 `-S` 源码树配置（子目录 [`five-stones/CMakeLists.txt`](five-stones/CMakeLists.txt) 仅 `add_executable`，不能单独当作工程根）
-- **测试**：GoogleTest（`BUILD_TESTING` 默认开启；若系统已安装可被 `find_package` 找到的 GTest，则不再下载；否则通过 FetchContent 拉取，见下文）
+- **构建**：CMake 3.16+，产物为 `gobang_server`。顶层 [`CMakeLists.txt`](CMakeLists.txt) 含 `project()`，**必须在仓库根目录**执行 `cmake -S .`（子目录 [`five-stones/CMakeLists.txt`](five-stones/CMakeLists.txt) 不能单独作为工程根）
+- **测试**：GoogleTest（`BUILD_TESTING` 默认开启；系统有 GTest 则优先用系统包，否则 FetchContent，见下文）
 
 ### 技术亮点
-- **事件驱动 + URI 路由分发**：基于 WebSocket++ 的事件循环统一接入 HTTP 与 WebSocket，按 URI（`/hall`、`/room`、`/spectate`）分发到不同业务处理函数（见 `five-stones/include/server.hpp`）。
-- **分段匹配队列 + 多线程匹配**：按分数分池（普通/高手/大神）进入不同匹配队列，匹配线程用条件变量阻塞等待（队列人数≥2）并完成配对建房（见 `five-stones/include/match.hpp`）。
-- **房间状态管理与广播同步**：封装落子校验、胜负判定、聊天、超时、再来一局，以及向双方玩家 + 观战者广播消息（见 `five-stones/include/room.hpp`）。
-- **Cookie/SSID 会话鉴权 + 定时回收**：登录下发 `SSID` 写入 Cookie，后续 HTTP/WS 从 Cookie 还原会话；通过定时器实现会话超时删除（在线期间可切换为永久、断连后恢复超时回收，见 `five-stones/include/session.hpp`）。
-- **在线连接映射与断线清理**：维护 uid→连接 的大厅/房间映射，断开连接时清理映射并触发房间退出逻辑（见 `five-stones/include/online.hpp`、`five-stones/include/server.hpp`）。
+- **事件驱动 + URI 路由**：WebSocket++ 事件循环统一处理 HTTP 与 WebSocket，按 `/hall`、`/room`、`/spectate` 分发（见 [`server.hpp`](five-stones/include/server.hpp)）
+- **分段匹配队列 + 多线程匹配**：按分数分池，条件变量阻塞等待，满两人配对建房（见 [`match.hpp`](five-stones/include/match.hpp)）
+- **房间状态与广播**：落子、胜负、聊天、超时、再来一局，向双方与观战者广播（见 [`room.hpp`](five-stones/include/room.hpp)）
+- **Cookie/SSID 会话**：登录下发 `SSID`，后续 HTTP/WS 从 Cookie 还原；定时器回收超时会话（见 [`session.hpp`](five-stones/include/session.hpp)）
+- **在线映射与断线清理**：uid→连接映射，断连时清理并触发房间逻辑（见 [`online.hpp`](five-stones/include/online.hpp)、[`server.hpp`](five-stones/include/server.hpp)）
 
-> 说明：当前实现支持 **身份续用（SSID 未过期时免重复登录）** 与 **观战快照恢复**；不支持“玩家断线后回到原对局房间继续下棋”的断线重连续局能力（断开 `/room` 会触发房间退出处理）。
+> 支持 **SSID 未过期免重复登录** 与 **观战快照恢复**；**不支持**断线回到原房间续弈（断开 `/room` 会走退出逻辑）。
 
 ---
 
 ## 快速开始
 
+**怎么读本文**
+- **先把服务跑起来**：按顺序看 **1 依赖 → 2 数据库 → 3 编译 → 4 启动与访问**。
+- **改端口、数据库、静态目录**：看 **「环境变量（服务端）」** 与 [`app_config.hpp`](five-stones/include/app_config.hpp)。
+- **跑测试 / MySQL 压测**：看 **「单元测试」** 与 **「MySQL 并发压测」**。
+
 ### 1) 安装依赖
-链接库与原先一致：`mysqlclient`、`jsoncpp`、`boost_system`、`pthread`（CMake 中通过 `Threads::Threads` 等配置）。
+
+需要：`mysqlclient`、`jsoncpp`、`boost_system`、`pthread`（CMake 已配置链接）。
 
 Ubuntu 示例：
 
@@ -38,10 +44,9 @@ sudo apt update
 sudo apt install -y build-essential cmake libmysqlclient-dev libjsoncpp-dev libboost-system-dev
 ```
 
-（`build-essential` 提供 `g++` 与 `make`，与上文 Unix Makefiles 构建方式一致。）
-
 ### 2) 准备数据库
-代码依赖一个 `user` 表，字段顺序与查询语句在 `five-stones/include/db.hpp` 中固定（`id, username, password, score, total_count, win_count`）。
+
+依赖 `user` 表，字段顺序与 [`db.hpp`](five-stones/include/db.hpp) 中 SQL 一致。`username` / `password` 等列长度需与代码里拼接的语句匹配（若改表结构请同步改 `db.hpp`）。
 
 ```sql
 CREATE DATABASE IF NOT EXISTS online_gobang DEFAULT CHARACTER SET utf8mb4;
@@ -58,37 +63,76 @@ CREATE TABLE IF NOT EXISTS user (
 );
 ```
 
-### 3) 编译与运行
+### 3) 编译
 
-在**仓库根目录**（包含顶层 `CMakeLists.txt` 的目录）执行 out-of-source 构建：
+在**仓库根目录**（含顶层 `CMakeLists.txt`）执行：
 
 ```bash
 cmake -S . -B build
 cmake --build build -j
 ```
 
-若本机未安装 Ninja，或希望显式使用 Make，可指定生成器（需已安装 `make`，Ubuntu 上通常随 `build-essential` 提供）：
+若需显式使用 Make：
 
 ```bash
 cmake -S . -B build -G "Unix Makefiles"
 cmake --build build -j
 ```
 
-可执行文件默认输出到 **`build/gobang_server`**（由子目录 `five-stones/CMakeLists.txt` 中 `RUNTIME_OUTPUT_DIRECTORY` 指定）。
+可执行文件：**`build/gobang_server`**（由 [`five-stones/CMakeLists.txt`](five-stones/CMakeLists.txt) 指定输出目录）。
 
-#### 日志（`LOG_LEVEL`）
+### 4) 启动与访问
 
-日志宏见 [`five-stones/include/logger.hpp`](five-stones/include/logger.hpp)：
+```bash
+./build/gobang_server 8080
+```
 
-- 环境变量 **`LOG_LEVEL`**：`debug`（默认，未设置或无法解析时同 `debug`）/`info`/`error`，不区分大小写。仅当消息严重度不低于设定阈值时输出（`debug` 输出 DEBUG/INFO/ERROR，`info` 输出 INFO/ERROR，`error` 仅输出 ERROR）。
-- **生产建议**：`LOG_LEVEL=error`，减少噪音与错误路径以外的日志量。
-- **输出流**：**ERROR** 写入 **stderr**，DEBUG / INFO 写入 **stdout**，便于容器或采集侧按流分流。
+也可不设命令行参数，改用环境变量 **`SERVER_PORT`**（见下表）；**命令行端口优先于 `SERVER_PORT`**。
 
-#### 单元测试（GoogleTest + CTest）
+浏览器打开：**`http://127.0.0.1:<端口>/`**（默认静态入口为 `login.html`）。
 
-默认会构建测试目标 `five_stones_tests`（源码在 [`tests/`](tests/)）。**当前用例覆盖三类**：**并发/压力**（[`stress_concurrency_test.cc`](tests/stress_concurrency_test.cc)：`match_queue` 多生产者、`wait` 唤醒、`session_manager` 并发创建/并发读）、**异常/边界**（[`boundary_exception_test.cc`](tests/boundary_exception_test.cc)：`json_util`/`string_util` 非法或边界输入、`match_queue` 空 `pop`、`session` 非法 ssid 等），以及 **MySQL 并发压测**（[`mysql_concurrency_stress_test.cc`](tests/mysql_concurrency_stress_test.cc)：默认连接与 `main.cc` 相同，本机无 MySQL 或连不上时 4 条用例 **SKIP**，见下文）。不含 HTTP/端到端脚本；高负载单线程用例 `Stress.DISABLED_MatchQueuePushPopSingleThreaded` 默认禁用，本地可去掉 `DISABLED_` 运行。
+**数据库与静态目录**：默认值与下表一致；启动前设置 `MYSQL_*`、`WWWROOT` 等即可覆盖，无需改代码。逻辑见 [`app_config.hpp`](five-stones/include/app_config.hpp)。
 
-**必须在仓库根目录**配置（含 `project()` 的顶层 [`CMakeLists.txt`](CMakeLists.txt)），勿在 `tests/` 下单独执行 `cmake ..`。
+> **静态资源路径**：CMake 会把源码树内 `five-stones/resources/wwwroot/` 的绝对路径写入编译宏 `WWWROOT`；若未设置环境变量 `WWWROOT`，运行时一般**不依赖**当前工作目录是否在 `build/`。
+
+### 5) 环境变量（服务端）
+
+与 MySQL 压测、[`load_cfg`](tests/mysql_concurrency_stress_test.cc) 使用同一套 `MYSQL_*` 命名。
+
+| 变量 | 含义 | 未设置时 |
+|------|------|----------|
+| `MYSQL_HOST` | MySQL 主机 | `127.0.0.1` |
+| `MYSQL_USER` | 用户名 | `wmx` |
+| `MYSQL_PASSWORD` | 密码 | `123456` |
+| `MYSQL_DATABASE` | 库名 | `online_gobang` |
+| `MYSQL_PORT` | MySQL 端口（须为合法整数） | `3306` |
+| `SERVER_PORT` | HTTP/WebSocket 监听端口 | `8080` |
+| `WWWROOT` | 静态资源根目录（覆盖编译期 `WWWROOT`） | 编译期注入路径 |
+| `LOG_LEVEL` | 日志过滤级别 | 见下节 |
+
+**监听端口**：`./gobang_server <port>` **>** `SERVER_PORT` **>** 默认 `8080`。`MYSQL_PORT` 只影响数据库，不是 Web 端口。
+
+**生产建议**：密码等敏感配置用环境或密钥注入，勿提交仓库；可设 `LOG_LEVEL=error`。
+
+### 6) 日志（`LOG_LEVEL`）
+
+变量名见上表。实现见 [`logger.hpp`](five-stones/include/logger.hpp)。
+
+- 取值（不区分大小写）：`debug`（默认，无法解析时同 `debug`）、`info`、`error`。只输出「严重度不低于当前阈值」的日志：`debug` 输出全部三级，`info` 输出 INFO+ERROR，`error` 仅 ERROR。
+- **生产**：建议 `LOG_LEVEL=error`，减少噪音。
+- **流**：ERROR → **stderr**；DEBUG / INFO → **stdout**（便于容器分流）。
+
+### 7) 单元测试（GoogleTest + CTest）
+
+源码在 [`tests/`](tests/)，目标 **`five_stones_tests`**。用例大致三类：
+
+- **并发 / 压力**：[`stress_concurrency_test.cc`](tests/stress_concurrency_test.cc)（`match_queue`、`session_manager` 等）
+- **边界 / 异常**：[`boundary_exception_test.cc`](tests/boundary_exception_test.cc)（`json_util`、`string_util`、`match_queue`、`session` 等）
+- **MySQL 压测**：[`mysql_concurrency_stress_test.cc`](tests/mysql_concurrency_stress_test.cc)（无 MySQL 或连不上时相关用例 **SKIP**，见下节）
+
+另：高负载单线程用例 `Stress.DISABLED_MatchQueuePushPopSingleThreaded` 默认禁用，本地可去掉 `DISABLED_` 运行。不含 HTTP 端到端自动化。
+
+**必须在仓库根目录配置**，勿在 `tests/` 下单独当 CMake 根执行 `cmake ..`。
 
 ```bash
 cmake -S . -B build
@@ -96,67 +140,57 @@ cmake --build build -j
 ctest --test-dir build --output-on-failure
 ```
 
-也可直接运行 `build/tests/five_stones_tests`（路径随生成器可能略有不同）。测试目标通过 `-include tests/wsserver_for_tests.h` 注入 `wsserver_t` 定义，以便编译 [`session.hpp`](five-stones/include/session.hpp)。
+也可直接运行 `build/tests/five_stones_tests`。编译时通过 `-include tests/wsserver_for_tests.h` 注入 `wsserver_t`，以编译 [`session.hpp`](five-stones/include/session.hpp)。
 
-#### MySQL 并发压测
+**测试构建选项**
 
-默认**无需设置环境变量**：连接参数与 [`five-stones/src/main.cc`](five-stones/src/main.cc) 一致（`127.0.0.1`、`wmx`、`123456`、`online_gobang`、`3306`）。直接运行 `ctest` 或 `build/tests/five_stones_tests` 时，若 MySQL 可达且存在 `user` 表，则 4 条用例会**真正执行**；若连不上则 **SKIPPED**，整体仍算通过。
+- 关闭测试：`cmake ... -DBUILD_TESTING=OFF`
+- 拉取 GoogleTest：若未找到系统 GTest，CMake 会 FetchContent（默认 GitHub，需网络）。镜像示例：  
+  `cmake -S . -B build -DFIVE_STONES_GOOGLETEST_REPOSITORY=https://gitee.com/mirrors/googletest.git`
+- 使用系统 GTest：安装发行版提供的开发包并能被 `find_package` 找到即可（包名因发行版而异，如 `libgtest-dev`）
 
-可选：用环境变量覆盖连接或压测规模（无需 `RUN_MYSQL_STRESS`）：
+### 8) MySQL 并发压测
+
+默认**可不设环境变量**：连接默认与 [`app_config.hpp`](five-stones/include/app_config.hpp) 及上表一致。MySQL 可达且存在 `user` 表时，4 条用例执行；否则 **SKIP**，整体仍可通过。
+
+可选覆盖连接与规模：
 
 ```bash
 export MYSQL_HOST=127.0.0.1
 export MYSQL_USER=你的用户
 export MYSQL_PASSWORD=你的密码
 export MYSQL_DATABASE=online_gobang_test
-# 可选：MYSQL_PORT、STRESS_THREADS（默认 16，上限 512）、STRESS_ITERS（默认 100，上限 100000）
+# 可选：MYSQL_PORT
+# STRESS_THREADS：默认 128，范围 1～512
+# STRESS_ITERS：默认 500，范围 1～100000
 ctest --test-dir build --output-on-failure
 ```
 
-**建议**在独立测试库上跑压测；若使用与线上一致的库名，用例仅删除 `username LIKE 'fstress%'` 的行，但仍需谨慎。`user_table` 为单连接且对部分 API 加锁，**insert 等路径未加锁**；压测用于观察多线程下的稳定性与可调参吞吐。
+**数据清理**：用例会删除 **`username LIKE 'ft%'`** 的行（压测专用前缀）。请在**独立测试库**上跑压测；若与业务库共用库名，仍有误删风险，需谨慎。
 
-- **关闭测试**（跳过 GTest 与 `tests/` 子目录，适合仅需发布的构建）：配置时加 `-DBUILD_TESTING=OFF`。
-- **拉取 googletest**：若未通过 `find_package(GTest)` 找到系统包，CMake 会使用 FetchContent 从 Git 克隆（默认仓库为 GitHub，**需要能访问外网或代理**）。若无法访问 GitHub，可在首次配置时指定镜像，例如：
+**说明**：压测里若 `MYSQL_PORT` 无法解析会**忽略**该变量；**服务端 `gobang_server`** 在 [`load_server_cfg`](five-stones/include/app_config.hpp) 中对非法 `MYSQL_PORT` 会**报错退出**，行为不同。
 
-```bash
-cmake -S . -B build -DFIVE_STONES_GOOGLETEST_REPOSITORY=https://gitee.com/mirrors/googletest.git
-```
+`user_table` 为单连接并对部分 API 加锁；压测用于观察多线程下稳定性与吞吐。
 
-- **使用系统 GTest**（可选）：安装发行版提供的 GTest 开发包并能被 CMake 找到后，将优先使用系统库，无需克隆（具体包名因发行版而异，例如部分环境为 `libgtest-dev`）。
+### 9) 可选：VS Code / Cursor（CMake Tools）
 
-#### VS Code / Cursor（CMake Tools）
+工作区含 [`.vscode/settings.json`](.vscode/settings.json)：`cmake.sourceDirectory` 指向仓库根，Linux 上推荐 **Unix Makefiles** 与 `CMAKE_MAKE_PROGRAM=/usr/bin/make`，避免子目录误配或 Windows 路径残留。若仍失败，检查用户/远程设置中的 `cmake.generator` 等是否含无效路径。
 
-工作区已包含 [`.vscode/settings.json`](.vscode/settings.json)：将 `cmake.sourceDirectory` 指向仓库根，并在 Linux 上使用 **Unix Makefiles** 与 `CMAKE_MAKE_PROGRAM=/usr/bin/make`，避免误用子目录为 CMake 根目录、或全局设置里残留的 Windows/Qt Ninja 路径导致配置失败。若你在其他机器上仍遇到类似问题，请在**用户设置**（含 Remote-SSH 的远程设置）中检查 `cmake.cmakePath`、`cmake.generator`、`cmake.configureSettings` 是否含有 `D:\...` 等无效路径。
-
-生成 `compile_commands.json` 供 clangd 等使用时，可在配置时加上 `-DCMAKE_EXPORT_COMPILE_COMMANDS=ON`（CMake Tools 中也可勾选对应选项）。
-
-```bash
-./build/gobang_server 8080
-```
-
-然后访问：
-
-- `http://127.0.0.1:8080/`（默认静态页为 `login.html`）
-
-> 数据库连接参数在 `five-stones/src/main.cc` 中配置（默认 host=`127.0.0.1`、user=`wmx`、pass=`123456`、db=`online_gobang`、port=`3306`）。
-
-> **WWWROOT**：CMake 构建时为编译宏 `WWWROOT` 注入**源码树内** `five-stones/resources/wwwroot/` 的绝对路径，运行时**不依赖**当前工作目录是否位于 `build/`。
+生成 `compile_commands.json`（如给 clangd）：配置时加 `-DCMAKE_EXPORT_COMPILE_COMMANDS=ON`。
 
 ---
 
 ## 目录结构
-- [`.gitignore`](.gitignore)：忽略 `build/`、常见 CMake 缓存与本地编译产物等
-- `CMakeLists.txt`：顶层工程，`project()`、`add_subdirectory(five-stones)`、`BUILD_TESTING` 时 `add_subdirectory(tests)`
-- `tests/`：GoogleTest（[`tests/CMakeLists.txt`](tests/CMakeLists.txt)、[`stress_concurrency_test.cc`](tests/stress_concurrency_test.cc)、[`boundary_exception_test.cc`](tests/boundary_exception_test.cc)、[`mysql_concurrency_stress_test.cc`](tests/mysql_concurrency_stress_test.cc)、[`wsserver_for_tests.h`](tests/wsserver_for_tests.h)）
-- `five-stones/include/match_queue.hpp`：匹配队列模板（由 [`match.hpp`](five-stones/include/match.hpp) 包含，供并发单测直接使用）
-- `.vscode/settings.json`（可选提交）：CMake Tools 在本仓库下的源码目录与生成器约定
-- `five-stones/CMakeLists.txt`：目标 `gobang_server`、包含路径、`WWWROOT` 宏、链接库
-- `five-stones/src/main.cc`：程序入口，构造 `gobang_server` 并 `start(port)`
-- `five-stones/include/`：头文件（`server.hpp`、`db.hpp` 等）
-  - `server.hpp`：HTTP/WS 回调注册、URI 分发与业务编排
-  - `db.hpp`：`user_table`，MySQL 用户与战绩读写
-  - `session.hpp` / `online.hpp` / `match.hpp` / `room.hpp` 等
-- `five-stones/resources/wwwroot/`：前端静态页面（登录/大厅/房间）
+- [`.gitignore`](.gitignore)：忽略 `build/` 等
+- [`CMakeLists.txt`](CMakeLists.txt)：顶层工程、`add_subdirectory(five-stones)`、测试时 `add_subdirectory(tests)`
+- [`tests/`](tests/)：GoogleTest（[`tests/CMakeLists.txt`](tests/CMakeLists.txt)、各 `.cc`、`wsserver_for_tests.h`）
+- [`five-stones/include/match_queue.hpp`](five-stones/include/match_queue.hpp)：匹配队列模板（[`match.hpp`](five-stones/include/match.hpp) 包含）
+- [`.vscode/settings.json`](.vscode/settings.json)（可选）：CMake Tools 约定
+- [`five-stones/CMakeLists.txt`](five-stones/CMakeLists.txt)：`gobang_server`、`WWWROOT`、链接库
+- [`five-stones/src/main.cc`](five-stones/src/main.cc)：入口，`load_server_cfg` 后构造服务并 `start`
+- [`five-stones/include/app_config.hpp`](five-stones/include/app_config.hpp)：运行时环境变量与默认配置
+- [`five-stones/include/`](five-stones/include/)：`server.hpp`、`db.hpp`、`session.hpp`、`online.hpp`、`match.hpp`、`room.hpp` 等
+- [`five-stones/resources/wwwroot/`](five-stones/resources/wwwroot/)：前端静态页
 
 ---
 
@@ -164,28 +198,27 @@ cmake -S . -B build -DFIVE_STONES_GOOGLETEST_REPOSITORY=https://gitee.com/mirror
 
 ### HTTP：登录与会话
 1. 浏览器 `POST /login`
-2. `server.hpp::login` -> `user_table::login`
+2. `server.hpp::login` → `user_table::login`
 3. `session_manager::create_session` 生成 `SSID`
-4. `Set-Cookie: SSID=...` 下发；后续请求通过 Cookie 还原 uid
+4. `Set-Cookie: SSID=...`；后续请求用 Cookie 还原 uid
 
 ### WS：大厅匹配（/hall）
-1. 前端 `WS /hall` 建连 -> `wsopen_game_hall`（进入大厅映射、返回 `hall_ready`）
-2. 点击“开始匹配”发送 `{optype:match_start}` -> `wsmsg_game_hall` -> `matcher::add(uid)`
-3. 匹配线程从队列取两人 -> `room_manager::create_room` -> 给双方推送 `match_success`
+1. `WS /hall` → `wsopen_game_hall`（`hall_ready`）
+2. `{optype:match_start}` → `wsmsg_game_hall` → `matcher::add(uid)`
+3. 匹配线程配对 → `room_manager::create_room` → `match_success`
 
 ### WS：房间对局（/room）
-1. 前端 `WS /room` 建连 -> `wsopen_game_room`（校验会话、进入房间映射、返回 `room_ready`）
-2. 发送落子/聊天/超时/重开等消息 -> `wsmsg_game_room` -> `room::handle_request`
-3. `room::broadcast` 同步给双方玩家（观战者也会收到同样广播）
+1. `WS /room` → `wsopen_game_room`（`room_ready`）
+2. 落子/聊天等 → `wsmsg_game_room` → `room::handle_request`
+3. `room::broadcast` 同步双方与观战者
 
-### WS：观战同步（/spectate）
-1. 大厅点击观战入口 -> `game_room.html?spectate=1&room_id=...`
-2. 前端 `WS /spectate` 建连后发送 `spectate_join`
-3. `wsmsg_spectate`：将连接加入房间观战表，回 `spectate_ready + board_snapshot`
-4. 后续房间内 `broadcast` 的 `put_chess/timeout/rematch_start/...` 会同时发送给观战者，实现实时同步
+### WS：观战（/spectate）
+1. `game_room.html?spectate=1&room_id=...`
+2. `WS /spectate` 后发 `spectate_join`
+3. `wsmsg_spectate`：加入观战表，回 `spectate_ready` 与棋盘快照
+4. 房间内广播同样发给观战者
 
 ---
 
 ## 注意事项
-- 当前行为：玩家 `/room` 断开会触发退出处理并可能导致房间销毁，因此不支持断线重连续局（但 SSID 未过期时可免重复登录）。
-
+- `/room` 断连会触发退出与房间清理，**无**断线续局；SSID 未过期可免重复登录（与上文「项目简介」一致）。

@@ -3,6 +3,7 @@
 // 本机无 MySQL 或连不上时 SetUp 中 ping 失败则 GTEST_SKIP，不算失败。
 // user_table 对部分 API 使用单连接 + 互斥锁，insert/win/lose 等未加锁；压测用户名前缀 ft（总长适配 VARCHAR(32)），结束时 DELETE LIKE 'ft%'。
 
+#include "app_config.hpp"
 #include "db.hpp"
 
 #include <gtest/gtest.h>
@@ -33,14 +34,6 @@ struct MysqlStressCfg
 
     bool valid = false;
 };
-
-// 若环境变量存在且非空，则覆盖 dst（避免 getenv 返回 nullptr 赋给 std::string）。
-void apply_env_override(std::string &dst, const char *env_name)
-{
-    const char *v = std::getenv(env_name);
-    if (v != nullptr && v[0] != '\0')
-        dst = v;
-}
 
 // 以 main.cc 默认值为基，可选读取 MYSQL_*、MYSQL_PORT、STRESS_THREADS、STRESS_ITERS。
 MysqlStressCfg load_cfg()
