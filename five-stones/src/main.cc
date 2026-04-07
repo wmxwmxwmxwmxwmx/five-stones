@@ -20,7 +20,8 @@ int main(int argc, char *argv[])
 
     try
     {
-        gobang_server server(cfg.db_host, cfg.db_user, cfg.db_pass, cfg.db_name, cfg.db_port, cfg.wwwroot);
+        gobang_server server(cfg.db_host, cfg.db_user, cfg.db_pass, cfg.db_name, cfg.db_port, cfg.wwwroot,
+                             cfg.redis_host, cfg.redis_port, cfg.redis_password, cfg.redis_db, cfg.redis_timeout_ms);
         INF_LOG("gobang server starting on port: %d", cfg.listen_port);
         server.start(cfg.listen_port);
     }

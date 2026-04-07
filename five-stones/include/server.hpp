@@ -11,6 +11,12 @@ typedef websocketpp::connection_hdl connection_hdl;
 typedef websocketpp::lib::shared_ptr<websocketpp::lib::asio::steady_timer> timer_ptr;
 
 #include "db.hpp"
+#include "cache/session_cache.hpp"
+#include "cache/user_cache.hpp"
+#ifdef FIVE_STONES_WITH_REDIS
+#include "cache/redis_session_cache.hpp"
+#include "cache/redis_user_cache.hpp"
+#endif
 #include "match.hpp"
 #include "online.hpp"
 #include "room.hpp"
@@ -18,6 +24,9 @@ typedef websocketpp::lib::shared_ptr<websocketpp::lib::asio::steady_timer> timer
 #include "util.hpp"
 
 #include <cstdint>
+#include <chrono>
+#include <exception>
+#include <memory>
 #include <string>
 
 #ifndef WWWROOT
@@ -30,6 +39,12 @@ class gobang_server
 private:
     std::string _web_root; // 静态资源根目录
     wsserver_t _wssrv;     // websocketpp server endpoint
+
+    NoopSessionCache _noop_session_cache;         // 空会话缓存
+    NoopUserCache _noop_user_cache;               // 空用户缓存
+    std::shared_ptr<SessionCache> _session_cache; // 会话缓存
+    std::shared_ptr<UserCache> _user_cache;       // 用户缓存
+    int _user_cache_ttl_sec = 120;                // 用户缓存超时时间
 
     user_table _ut;      // 用户表
     online_manager _om;  // 在线管理器
@@ -81,6 +96,19 @@ private:
 
         conn->set_body(body);
         conn->set_status(websocketpp::http::status_code::ok);
+    }
+
+    void session_expire_with_cache(uint64_t ssid, int ms)
+    {
+        _sm.set_session_expire_time(ssid, ms);//设置会话超时时间
+        //如果redis会话缓存不为空，则设置redis会话超时时间
+        if (_session_cache)
+        {   
+            if (ms == SESSION_FOREVER)//如果会话超时时间等于永久存在
+                (void)_session_cache->delSession(ssid);//删除会话缓存
+            else if (ms > 0)//如果会话超时时间大于0
+                (void)_session_cache->expireSession(ssid, ms / 1000);//设置会话超时时间
+        }
     }
 
     // 用户注册
@@ -142,7 +170,9 @@ private:
             return http_resp(conn, false, websocketpp::http::status_code::internal_server_error, "创建会话失败");
         }
 
-        _sm.set_session_expire_time(ssp->ssid(), SESSION_TIMEOUT); // 设置会话超时时间
+        session_expire_with_cache(ssp->ssid(), SESSION_TIMEOUT); // 设置会话超时时间
+        if (_session_cache)
+            (void)_session_cache->setSession(ssp->ssid(), uid, SESSION_TIMEOUT / 1000);
 
         std::string cookie_ssid = "SSID=" + std::to_string(ssp->ssid()); // 设置cookie
         conn->append_header("Set-Cookie", cookie_ssid);
@@ -193,8 +223,24 @@ private:
             return session_ptr();       // 返回空指针
         }
 
-        session_ptr ssp = _sm.get_session_by_ssid(std::stoull(ssid_str)); // 根据SSID获取session
-        if (!ssp)                                                         // 如果session为空
+        const uint64_t ssid = std::stoull(ssid_str);//将SSID转换为uint64_t
+        session_ptr ssp = _sm.get_session_by_ssid(ssid); // 根据SSID获取session
+        //如果session为空，并且有会话缓存，则从会话缓存中获取session
+        if (!ssp && _session_cache)//如果session为空，并且有会话缓存   
+        {
+            uint64_t uid = 0;
+            if (_session_cache->getSession(ssid, uid))//如果获取到用户ID
+            {
+                session_ptr restored(new session(ssid));//创建session
+                restored->set_statu(LOGIN);//设置状态为登录
+                restored->set_user(uid);//设置用户ID
+                _sm.append_session(restored);//添加session
+                ssp = restored;//设置session
+                session_expire_with_cache(ssid, SESSION_TIMEOUT);//设置会话超时时间
+            }
+        }
+        //如果session为空，则返回错误响应
+        if (!ssp)
         {
             err_resp["optype"] = optype_for_err;
             err_resp["reason"] = "没有找到session信息,需要重新登录";
@@ -209,17 +255,9 @@ private:
     // 用户信息接口（HTTP）
     void info(wsserver_t::connection_ptr &conn)
     {
-        std::string cookie_str = conn->get_request_header("Cookie"); // 获取cookie
-        if (cookie_str.empty())
-            return http_resp(conn, false, websocketpp::http::status_code::bad_request, "找不到cookie信息,请重新登录");
-
-        std::string ssid_str;
-        if (!get_cookie_val(cookie_str, "SSID", ssid_str)) // 获取SSID
-            return http_resp(conn, false, websocketpp::http::status_code::bad_request, "找不到ssid信息,请重新登录");
-
-        session_ptr ssp = _sm.get_session_by_ssid(std::stoull(ssid_str));                                      // 根据SSID获取session
-        if (!ssp)                                                                                              // 如果session为空
-            return http_resp(conn, false, websocketpp::http::status_code::bad_request, "登录过期,请重新登录"); // 登录过期
+        session_ptr ssp = get_session_by_cookie(conn, "info");
+        if (!ssp)
+            return;
 
         Json::Value user_info;                 // 解析用户信息
         uint64_t uid = ssp->get_user();        // 获取用户ID
@@ -232,7 +270,7 @@ private:
         conn->append_header("Content-Type", "application/json"); // 设置响应头
         conn->set_status(websocketpp::http::status_code::ok);
 
-        _sm.set_session_expire_time(ssp->ssid(), SESSION_TIMEOUT); // 滑动续期（用户有活跃请求，就把会话过期时间往后延）
+        session_expire_with_cache(ssp->ssid(), SESSION_TIMEOUT); // 滑动续期（用户有活跃请求，就把会话过期时间往后延）
     }
 
     // HTTP 回调
@@ -287,7 +325,7 @@ private:
         resp_json["result"] = true;         // 设置结果为true
         ws_resp(conn, resp_json);
         // 5. 设置会话超时时间为永久存在（进入大厅后不希望会话过期被删除）
-        _sm.set_session_expire_time(ssp->ssid(), SESSION_FOREVER); // 设置会话超时时间
+        session_expire_with_cache(ssp->ssid(), SESSION_FOREVER); // 设置会话超时时间
     }
 
     // /room 建连
@@ -340,7 +378,7 @@ private:
         _om.enter_game_room(uid, conn); // 进入游戏房间
         DBG_LOG("wsopen_game_room: uid=%llu 已进入游戏房间映射", (unsigned long long)uid);
         // 5. 设置会话超时时间为永久存在（进入房间后不希望会话过期被删除）
-        _sm.set_session_expire_time(ssp->ssid(), SESSION_FOREVER); // 设置会话超时时间
+        session_expire_with_cache(ssp->ssid(), SESSION_FOREVER); // 设置会话超时时间
         // 6. 回复房间准备完毕
         resp_json["optype"] = "room_ready";                         // 设置操作类型
         resp_json["result"] = true;                                 // 设置结果为true
@@ -376,7 +414,7 @@ private:
             return;
 
         // 观战期间不希望 session 立刻过期
-        _sm.set_session_expire_time(ssp->ssid(), SESSION_FOREVER);
+        session_expire_with_cache(ssp->ssid(), SESSION_FOREVER);
     }
 
     void wsopen_callback(websocketpp::connection_hdl hdl)
@@ -404,7 +442,7 @@ private:
         // 2. 将玩家从游戏大厅中移除
         _om.exit_game_hall(ssp->get_user());
         // 3. 将session恢复生命周期的管理，设置定时销毁
-        _sm.set_session_expire_time(ssp->ssid(), SESSION_TIMEOUT);
+        session_expire_with_cache(ssp->ssid(), SESSION_TIMEOUT);
     }
 
     /// /room 建连断开后的处理
@@ -418,7 +456,7 @@ private:
         // 2. 将玩家从游戏房间中移除
         _om.exit_game_room(ssp->get_user());
         // 3. 将session恢复生命周期的管理，设置定时销毁
-        _sm.set_session_expire_time(ssp->ssid(), SESSION_TIMEOUT);
+        session_expire_with_cache(ssp->ssid(), SESSION_TIMEOUT);
         // 4. 将玩家从房间管理器中移除（比如玩家掉线了，房间需要解散或者等待其他玩家加入等）
         _rm.remove_room_user(ssp->get_user());
     }
@@ -444,7 +482,7 @@ private:
 
         const uint64_t uid = ssp->get_user();
         _rm.remove_spectator_user(uid);
-        _sm.set_session_expire_time(ssp->ssid(), SESSION_TIMEOUT);
+        session_expire_with_cache(ssp->ssid(), SESSION_TIMEOUT);
     }
 
     // /hall 消息处理
@@ -650,8 +688,15 @@ public:
                   const std::string &pass,
                   const std::string &dbname,
                   uint16_t port = 3306,
-                  const std::string &wwwroot = WWWROOT)
+                  const std::string &wwwroot = WWWROOT,
+                  const std::string &redis_host = "127.0.0.1",
+                  uint16_t redis_port = 6379,
+                  const std::string &redis_password = "",
+                  int redis_db = 0,
+                  int redis_timeout_ms = 200)
         : _web_root(wwwroot),
+          _session_cache(&_noop_session_cache, [](SessionCache *) {}),//空会话缓存，自定义销毁函数
+          _user_cache(&_noop_user_cache, [](UserCache *) {}),//空用户缓存，自定义销毁函数
           _ut(host, user, pass, dbname, port),
           _rm(&_ut, &_om), //_om(online_manager)有默认构造函数
           _mm(&_rm, &_ut, &_om),
@@ -670,6 +715,38 @@ public:
         // 大厅匹配消息、房间内下棋/聊天
         _wssrv.set_message_handler(
             std::bind(&gobang_server::wsmsg_callback, this, std::placeholders::_1, std::placeholders::_2)); // 设置wsmsg回调
+
+//如果定义了FIVE_STONES_WITH_REDIS，则使用Redis缓存
+#ifdef FIVE_STONES_WITH_REDIS
+        try
+        {
+            sw::redis::ConnectionOptions opts;
+            opts.host = redis_host;
+            opts.port = redis_port;
+            opts.password = redis_password;
+            opts.db = redis_db;
+            opts.socket_timeout = std::chrono::milliseconds(redis_timeout_ms);
+            auto redis = std::make_shared<sw::redis::Redis>(opts);//创建客户端
+            _session_cache.reset(new RedisSessionCache(redis));//创建会话缓存
+            _user_cache.reset(new RedisUserCache(redis));//创建用户缓存
+            _ut.set_user_cache(_user_cache.get(), _user_cache_ttl_sec);//设置用户缓存
+            INF_LOG("redis cache enabled: %s:%u db=%d", redis_host.c_str(), (unsigned)redis_port, redis_db);
+        }
+        catch (const std::exception &e)
+        {
+            ERR_LOG("redis init failed, fallback to in-memory/mysql path: %s", e.what());
+            _session_cache.reset(&_noop_session_cache, [](SessionCache *) {});
+            _user_cache.reset(&_noop_user_cache, [](UserCache *) {});
+            _ut.set_user_cache(_user_cache.get(), _user_cache_ttl_sec);
+        }
+#else
+        (void)redis_host;
+        (void)redis_port;
+        (void)redis_password;
+        (void)redis_db;
+        (void)redis_timeout_ms;
+        _ut.set_user_cache(_user_cache.get(), _user_cache_ttl_sec);//设置用户缓存
+#endif
     }
 
     void start(int port)

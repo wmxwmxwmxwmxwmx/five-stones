@@ -79,6 +79,8 @@ cmake -S . -B build -G "Unix Makefiles"
 cmake --build build -j
 ```
 
+Redis 后端说明：默认尝试启用 `redis-plus-plus`（`-DFIVE_STONES_WITH_REDIS=ON`）。若本机未安装 `redis++/hiredis`，构建会自动回退为无 Redis 后端；也可显式关闭：`-DFIVE_STONES_WITH_REDIS=OFF`。
+
 可执行文件：**`build/gobang_server`**（由 [`five-stones/CMakeLists.txt`](five-stones/CMakeLists.txt) 指定输出目录）。
 
 ### 4) 启动与访问
@@ -108,11 +110,25 @@ cmake --build build -j
 | `MYSQL_PORT` | MySQL 端口（须为合法整数） | `3306` |
 | `SERVER_PORT` | HTTP/WebSocket 监听端口 | `8080` |
 | `WWWROOT` | 静态资源根目录（覆盖编译期 `WWWROOT`） | 编译期注入路径 |
+| `REDIS_HOST` | Redis 主机 | `127.0.0.1` |
+| `REDIS_PORT` | Redis 端口（须为合法整数） | `6379` |
+| `REDIS_PASSWORD` | Redis 密码 | 空 |
+| `REDIS_DB` | Redis DB 索引（非负整数） | `0` |
+| `REDIS_TIMEOUT_MS` | Redis 超时毫秒 | `200` |
 | `LOG_LEVEL` | 日志过滤级别 | 见下节 |
+
+### Redis 缓存行为（实际实现）
+
+- 会话缓存：`sess:{ssid}`，value 存 `uid`（不存整份 session），命中后会恢复到内存 `session_manager`。
+- 用户缓存：`user:id:{uid}` 与 `user:name:{username}`，value 为 `Json::Value` 序列化后的 JSON 字符串（带用户分数等字段）。
+- 读路径（Cache Aside）：会话 cookie 查找先查内存 miss -> Redis；用户 `select_by_*` 先查 Redis miss -> MySQL，成功后回填 Redis。
+- TTL：用户缓存默认 TTL 为 120s；会话 TTL 由 `session_expire_with_cache` 处理（`ms > 0` 时写 Redis 并设置 `expire`；`SESSION_FOREVER` 时会删除 Redis key）。
+- 失效：胜负更新成功后会执行 `invalidateById(id)`，Redis 实现会同时删除 `user:id` 与对应 `user:name` key。
+- 降级：构建时若未启用或运行时 Redis 初始化失败，会自动回退到 Noop（不影响主流程）。
 
 **监听端口**：`./gobang_server <port>` **>** `SERVER_PORT` **>** 默认 `8080`。`MYSQL_PORT` 只影响数据库，不是 Web 端口。
 
-**生产建议**：密码等敏感配置用环境或密钥注入，勿提交仓库；可设 `LOG_LEVEL=error`。
+**生产建议**：密码等敏感配置用环境或密钥注入，勿提交仓库；可设 `LOG_LEVEL=error`。Redis 初始化/读写失败会自动降级回 MySQL/内存路径不影响主流程；另外当会话设置为 `SESSION_FOREVER` 时，本实现会删除 Redis 的对应 key，因此跨实例恢复主要依赖本机内存会话仍存活。
 
 ### 6) 日志（`LOG_LEVEL`）
 

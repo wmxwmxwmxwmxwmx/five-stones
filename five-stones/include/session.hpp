@@ -89,6 +89,8 @@ public:
             return;
         std::unique_lock<std::mutex> lock(_mutex);
         _session[ssp->ssid()] = ssp;
+        if (ssp->ssid() >= _next_ssid)
+            _next_ssid = ssp->ssid() + 1;
     }
 
     // 根据 session ID 获取 session 指针：成功返回 session 指针，失败返回空指针

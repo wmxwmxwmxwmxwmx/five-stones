@@ -2,6 +2,7 @@
 #define __M_DB_H__
 
 #include "util.hpp"
+#include "cache/user_cache.hpp"
 
 #include <cassert>
 #include <cstdint>
@@ -13,6 +14,8 @@ class user_table
 private:
     MYSQL *_mysql;     // mysql操作句柄
     std::mutex _mutex; // 互斥锁保护数据库的访问操作
+    UserCache *_user_cache = nullptr;
+    int _user_cache_ttl_sec = 120;
 
 public:
     user_table(const std::string &host,
@@ -29,6 +32,12 @@ public:
     {
         mysql_util::mysql_release(_mysql);
         _mysql = NULL;
+    }
+
+    void set_user_cache(UserCache *uc, int ttl_sec = 120)
+    {
+        _user_cache = uc;
+        _user_cache_ttl_sec = ttl_sec;
     }
 
     // 注册时新增用户
@@ -114,15 +123,22 @@ public:
     // 通过用户名获取用户信息
     bool select_by_name(const std::string &name, Json::Value &user)
     {
+        //如果用户缓存不为空，则从用户缓存中获取用户信息
+        if (_user_cache && _user_cache->getUserByName(name, user))
+            return true;
+
+        //如果用户缓存为空，则从数据库中获取用户信息
         #define USER_BY_NAME "select id, score, total_count, win_count from user where username='%s';"
 
         char sql[4096] = {0};
         sprintf(sql, USER_BY_NAME, name.c_str());
 
+        //加锁保护数据库访问
         MYSQL_RES *res = NULL;
         {
             std::unique_lock<std::mutex> lock(_mutex);
 
+            //执行SQL语句
             bool ret = mysql_util::mysql_exec(_mysql, sql);
             if (ret == false)
             {
@@ -130,6 +146,7 @@ public:
                 return false;
             }
 
+            //获取查询结果
             res = mysql_store_result(_mysql);
             if (res == NULL)
             {
@@ -153,13 +170,21 @@ public:
         user["total_count"] = std::stoi(row[2]);
         user["win_count"] = std::stoi(row[3]);
 
-        mysql_free_result(res);
+        mysql_free_result(res); //释放查询结果
+        //如果用户缓存不为空，则设置用户缓存
+        if (_user_cache)
+            (void)_user_cache->setUser(user["id"].asUInt64(), name, user, _user_cache_ttl_sec);
         return true;
     }
 
     // 通过ID获取用户信息
     bool select_by_id(uint64_t id, Json::Value &user)
     {
+        //如果用户缓存不为空，则从用户缓存中获取用户信息
+        if (_user_cache && _user_cache->getUserById(id, user))
+            return true;
+
+        //如果用户缓存为空，则从数据库中获取用户信息
         #define USER_BY_ID "select username, score, total_count, win_count from user where id=%llu;"
 
         char sql[4096] = {0};
@@ -200,6 +225,9 @@ public:
         user["win_count"] = std::stoi(row[3]);
 
         mysql_free_result(res);
+        //如果用户缓存不为空，则设置用户缓存
+        if (_user_cache)
+            (void)_user_cache->setUser(id, user["username"].asString(), user, _user_cache_ttl_sec);
         return true;
     }
 
@@ -219,6 +247,11 @@ public:
             return false;
         }
 
+        //写数据库成功后，删缓存让下次读取重建，避免读到旧分数。
+        //如果用户缓存不为空，则删除用户缓存
+        if (_user_cache)
+            (void)_user_cache->invalidateById(id);
+
         return true;
     }
 
@@ -237,6 +270,10 @@ public:
             DBG_LOG("update lose user info failed!!\n");
             return false;
         }
+        //写数据库成功后，删缓存让下次读取重建，避免读到旧分数。
+        //如果用户缓存不为空，则删除用户缓存
+        if (_user_cache)
+            (void)_user_cache->invalidateById(id);
 
         return true;
     }
