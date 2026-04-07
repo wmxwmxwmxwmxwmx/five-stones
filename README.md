@@ -1,41 +1,17 @@
-## five-stones：在线五子棋对战（HTTP + WebSocket）
+# five-stones：在线五子棋对战后端
 
-### 项目简介
-基于 **Linux/C++** 开发的实时对战后端，提供**登录鉴权**、**大厅匹配**、**房间对局**、**观战同步**与**战绩落库**等功能，完成 **HTTP + WebSocket** 一体化通信闭环。
+`five-stones` 是基于 C++17 的 Linux 后端服务，提供 HTTP 与 WebSocket 一体化能力，包含注册登录、会话鉴权、大厅匹配、房间对局、观战同步与战绩落库。
 
-核心功能：
-- **HTTP**：静态资源（源码树内 `five-stones/resources/wwwroot/`，CMake 通过宏 `WWWROOT` 注入绝对路径）、注册/登录/用户信息接口
-- **WebSocket**：大厅 `/hall` 匹配与房间列表，房间 `/room` 对局消息，观战 `/spectate` 快照与同步
-- **数据落库**：MySQL 用户与战绩（积分、总局数、胜局数）
+## 功能概览
 
-### 技术栈
-- **语言/平台**：C++17、Linux
-- **网络与并发**：WebSocket++（ASIO）、STL 线程与同步原语
-- **数据与序列化**：MySQL C API（`libmysqlclient`）、JsonCpp
-- **构建**：CMake 3.16+，产物为 `gobang_server`。顶层 [`CMakeLists.txt`](CMakeLists.txt) 含 `project()`，**必须在仓库根目录**执行 `cmake -S .`（子目录 [`five-stones/CMakeLists.txt`](five-stones/CMakeLists.txt) 不能单独作为工程根）
-- **测试**：GoogleTest（`BUILD_TESTING` 默认开启；系统有 GTest 则优先用系统包，否则 FetchContent，见下文）
-
-### 技术亮点
-- **事件驱动 + URI 路由**：WebSocket++ 事件循环统一处理 HTTP 与 WebSocket，按 `/hall`、`/room`、`/spectate` 分发（见 [`server.hpp`](five-stones/include/server.hpp)）
-- **分段匹配队列 + 多线程匹配**：按分数分池，条件变量阻塞等待，满两人配对建房（见 [`match.hpp`](five-stones/include/match.hpp)）
-- **房间状态与广播**：落子、胜负、聊天、超时、再来一局，向双方与观战者广播（见 [`room.hpp`](five-stones/include/room.hpp)）
-- **Cookie/SSID 会话**：登录下发 `SSID`，后续 HTTP/WS 从 Cookie 还原；定时器回收超时会话（见 [`session.hpp`](five-stones/include/session.hpp)）
-- **在线映射与断线清理**：uid→连接映射，断连时清理并触发房间逻辑（见 [`online.hpp`](five-stones/include/online.hpp)、[`server.hpp`](five-stones/include/server.hpp)）
-
-> 支持 **SSID 未过期免重复登录** 与 **观战快照恢复**；**不支持**断线回到原房间续弈（断开 `/room` 会走退出逻辑）。
-
----
+- HTTP：静态资源、`POST /reg`、`POST /login`、`GET /info`
+- WebSocket：`/hall`、`/room`、`/spectate` 三类实时通道
+- 数据存储：MySQL 用户与战绩
+- 可选缓存：Redis（编译期可开关，运行期可降级）
 
 ## 快速开始
 
-**怎么读本文**
-- **先把服务跑起来**：按顺序看 **1 依赖 → 2 数据库 → 3 编译 → 4 启动与访问**。
-- **改端口、数据库、静态目录**：看 **「环境变量（服务端）」** 与 [`app_config.hpp`](five-stones/include/app_config.hpp)。
-- **跑测试 / MySQL 压测**：看 **「单元测试」** 与 **「MySQL 并发压测」**。
-
 ### 1) 安装依赖
-
-需要：`mysqlclient`、`jsoncpp`、`boost_system`、`pthread`（CMake 已配置链接）。
 
 Ubuntu 示例：
 
@@ -44,9 +20,9 @@ sudo apt update
 sudo apt install -y build-essential cmake libmysqlclient-dev libjsoncpp-dev libboost-system-dev
 ```
 
-### 2) 准备数据库
+说明：Redis 后端依赖 `redis-plus-plus` 与 `hiredis`，仅在你需要 Redis 缓存路径时安装。
 
-依赖 `user` 表，字段顺序与 [`db.hpp`](five-stones/include/db.hpp) 中 SQL 一致。`username` / `password` 等列长度需与代码里拼接的语句匹配（若改表结构请同步改 `db.hpp`）。
+### 2) 准备数据库
 
 ```sql
 CREATE DATABASE IF NOT EXISTS online_gobang DEFAULT CHARACTER SET utf8mb4;
@@ -65,90 +41,91 @@ CREATE TABLE IF NOT EXISTS user (
 
 ### 3) 编译
 
-在**仓库根目录**（含顶层 `CMakeLists.txt`）执行：
+必须在仓库根目录（含顶层 `CMakeLists.txt`）执行：
 
 ```bash
 cmake -S . -B build
 cmake --build build -j
 ```
 
-若需显式使用 Make：
+可执行文件输出到 `build/gobang_server`。
 
-```bash
-cmake -S . -B build -G "Unix Makefiles"
-cmake --build build -j
-```
-
-Redis 后端说明：默认尝试启用 `redis-plus-plus`（`-DFIVE_STONES_WITH_REDIS=ON`）。若本机未安装 `redis++/hiredis`，构建会自动回退为无 Redis 后端；也可显式关闭：`-DFIVE_STONES_WITH_REDIS=OFF`。
-
-可执行文件：**`build/gobang_server`**（由 [`five-stones/CMakeLists.txt`](five-stones/CMakeLists.txt) 指定输出目录）。
-
-### 4) 启动与访问
+### 4) 启动
 
 ```bash
 ./build/gobang_server 8080
 ```
 
-也可不设命令行参数，改用环境变量 **`SERVER_PORT`**（见下表）；**命令行端口优先于 `SERVER_PORT`**。
+浏览器访问 `http://127.0.0.1:8080/`。
 
-浏览器打开：**`http://127.0.0.1:<端口>/`**（默认静态入口为 `login.html`）。
+## Redis 开关与判定（重点）
 
-**数据库与静态目录**：默认值与下表一致；启动前设置 `MYSQL_*`、`WWWROOT` 等即可覆盖，无需改代码。逻辑见 [`app_config.hpp`](five-stones/include/app_config.hpp)。
+### 编译期是否启用 Redis 代码
 
-> **静态资源路径**：CMake 会把源码树内 `five-stones/resources/wwwroot/` 的绝对路径写入编译宏 `WWWROOT`；若未设置环境变量 `WWWROOT`，运行时一般**不依赖**当前工作目录是否在 `build/`。
+- 默认尝试启用：`-DFIVE_STONES_WITH_REDIS=ON`
+- 显式关闭：`-DFIVE_STONES_WITH_REDIS=OFF`
+- 当配置为 ON 但未找到 `redis++/hiredis` 时，CMake 会警告并关闭 Redis 后端
 
-### 5) 环境变量（服务端）
+建议：
 
-与 MySQL 压测、[`load_cfg`](tests/mysql_concurrency_stress_test.cc) 使用同一套 `MYSQL_*` 命名。
+```bash
+# 无 Redis 后端
+cmake -S . -B build_no_redis -DFIVE_STONES_WITH_REDIS=OFF
 
-| 变量 | 含义 | 未设置时 |
-|------|------|----------|
+# 尝试启用 Redis 后端
+cmake -S . -B build_redis_on -DFIVE_STONES_WITH_REDIS=ON
+```
+
+### 运行期是否真正使用 Redis
+
+若二进制已编进 Redis 分支，服务启动时会出现以下日志之一：
+
+- `redis cache enabled: ...`：已连接 Redis，正在使用缓存
+- `redis init failed, fallback to in-memory/mysql path: ...`：初始化失败，已降级到内存/MySQL 路径
+
+若这两条都没有，通常说明当前二进制未编入 Redis 分支（可检查 `compile_commands.json` 是否含 `-DFIVE_STONES_WITH_REDIS=1`）。
+
+## HTTP 接口与状态码
+
+### `POST /reg`
+
+- `200`：注册成功
+- `400`：请求体 JSON 非法、缺少用户名/密码、用户名已占用
+
+### `POST /login`
+
+- `200`：登录成功（返回 `Set-Cookie: SSID=...`）
+- `400`：请求体 JSON 非法、缺少用户名/密码、用户名或密码错误
+- `500`：会话创建失败
+
+### `GET /info`
+
+- `200`：返回当前用户信息
+- `400`：找不到用户信息（需重新登录）
+
+## 服务端环境变量
+
+| 变量 | 含义 | 默认值 |
+|------|------|--------|
 | `MYSQL_HOST` | MySQL 主机 | `127.0.0.1` |
-| `MYSQL_USER` | 用户名 | `wmx` |
-| `MYSQL_PASSWORD` | 密码 | `123456` |
-| `MYSQL_DATABASE` | 库名 | `online_gobang` |
-| `MYSQL_PORT` | MySQL 端口（须为合法整数） | `3306` |
-| `SERVER_PORT` | HTTP/WebSocket 监听端口 | `8080` |
-| `WWWROOT` | 静态资源根目录（覆盖编译期 `WWWROOT`） | 编译期注入路径 |
+| `MYSQL_USER` | MySQL 用户名 | `wmx` |
+| `MYSQL_PASSWORD` | MySQL 密码 | `123456` |
+| `MYSQL_DATABASE` | MySQL 库名 | `online_gobang` |
+| `MYSQL_PORT` | MySQL 端口 | `3306` |
 | `REDIS_HOST` | Redis 主机 | `127.0.0.1` |
-| `REDIS_PORT` | Redis 端口（须为合法整数） | `6379` |
+| `REDIS_PORT` | Redis 端口 | `6379` |
 | `REDIS_PASSWORD` | Redis 密码 | 空 |
-| `REDIS_DB` | Redis DB 索引（非负整数） | `0` |
+| `REDIS_DB` | Redis DB 索引 | `0` |
 | `REDIS_TIMEOUT_MS` | Redis 超时毫秒 | `200` |
-| `LOG_LEVEL` | 日志过滤级别 | 见下节 |
+| `SERVER_PORT` | 服务监听端口 | `8080` |
+| `WWWROOT` | 静态资源目录 | 编译期注入路径 |
+| `LOG_LEVEL` | 日志级别（`debug/info/error`） | `debug` |
 
-### Redis 缓存行为（实际实现）
+端口优先级：命令行参数 `./gobang_server <port>` > `SERVER_PORT` > 默认 `8080`。
 
-- 会话缓存：`sess:{ssid}`，value 存 `uid`（不存整份 session），命中后会恢复到内存 `session_manager`。
-- 用户缓存：`user:id:{uid}` 与 `user:name:{username}`，value 为 `Json::Value` 序列化后的 JSON 字符串（带用户分数等字段）。
-- 读路径（Cache Aside）：会话 cookie 查找先查内存 miss -> Redis；用户 `select_by_*` 先查 Redis miss -> MySQL，成功后回填 Redis。
-- TTL：用户缓存默认 TTL 为 120s；会话 TTL 由 `session_expire_with_cache` 处理（`ms > 0` 时写 Redis 并设置 `expire`；`SESSION_FOREVER` 时会删除 Redis key）。
-- 失效：胜负更新成功后会执行 `invalidateById(id)`，Redis 实现会同时删除 `user:id` 与对应 `user:name` key。
-- 降级：构建时若未启用或运行时 Redis 初始化失败，会自动回退到 Noop（不影响主流程）。
+## 测试与压测
 
-**监听端口**：`./gobang_server <port>` **>** `SERVER_PORT` **>** 默认 `8080`。`MYSQL_PORT` 只影响数据库，不是 Web 端口。
-
-**生产建议**：密码等敏感配置用环境或密钥注入，勿提交仓库；可设 `LOG_LEVEL=error`。Redis 初始化/读写失败会自动降级回 MySQL/内存路径不影响主流程；另外当会话设置为 `SESSION_FOREVER` 时，本实现会删除 Redis 的对应 key，因此跨实例恢复主要依赖本机内存会话仍存活。
-
-### 6) 日志（`LOG_LEVEL`）
-
-变量名见上表。实现见 [`logger.hpp`](five-stones/include/logger.hpp)。
-
-- 取值（不区分大小写）：`debug`（默认，无法解析时同 `debug`）、`info`、`error`。只输出「严重度不低于当前阈值」的日志：`debug` 输出全部三级，`info` 输出 INFO+ERROR，`error` 仅 ERROR。
-- **生产**：建议 `LOG_LEVEL=error`，减少噪音。
-- **流**：ERROR → **stderr**；DEBUG / INFO → **stdout**（便于容器分流）。
-
-### 7) 单元测试（GoogleTest + CTest）
-
-源码在 [`tests/`](tests/)，目标 **`five_stones_tests`**。用例大致三类：
-
-- **并发 / 压力**：[`stress_concurrency_test.cc`](tests/stress_concurrency_test.cc)（`match_queue`、`session_manager` 等）
-- **边界 / 异常**：[`boundary_exception_test.cc`](tests/boundary_exception_test.cc)（`json_util`、`string_util`、`match_queue`、`session` 等）
-- **MySQL 压测**：[`mysql_concurrency_stress_test.cc`](tests/mysql_concurrency_stress_test.cc)（无 MySQL 或连不上时相关用例 **SKIP**，见下节）
-
-另：高负载单线程用例 `Stress.DISABLED_MatchQueuePushPopSingleThreaded` 默认禁用，本地可去掉 `DISABLED_` 运行。不含 HTTP 端到端自动化。
-
-**必须在仓库根目录配置**，勿在 `tests/` 下单独当 CMake 根执行 `cmake ..`。
+### 单元测试（gtest）
 
 ```bash
 cmake -S . -B build
@@ -156,85 +133,39 @@ cmake --build build -j
 ctest --test-dir build --output-on-failure
 ```
 
-也可直接运行 `build/tests/five_stones_tests`。编译时通过 `-include tests/wsserver_for_tests.h` 注入 `wsserver_t`，以编译 [`session.hpp`](five-stones/include/session.hpp)。
+测试目标为 `build/tests/five_stones_tests`。
 
-**测试构建选项**
+### k6 压测（Redis 前后对比）
 
-- 关闭测试：`cmake ... -DBUILD_TESTING=OFF`
-- 拉取 GoogleTest：若未找到系统 GTest，CMake 会 FetchContent（默认 GitHub，需网络）。镜像示例：  
-  `cmake -S . -B build -DFIVE_STONES_GOOGLETEST_REPOSITORY=https://gitee.com/mirrors/googletest.git`
-- 使用系统 GTest：安装发行版提供的开发包并能被 `find_package` 找到即可（包名因发行版而异，如 `libgtest-dev`）
+压测脚本位于 `scripts/k6/`，详见 [`scripts/k6/README.md`](scripts/k6/README.md)。
 
-### 8) MySQL 并发压测
+推荐对比方式：同一台机器、同一组 k6 参数下分别运行：
 
-默认**可不设环境变量**：连接默认与 [`app_config.hpp`](five-stones/include/app_config.hpp) 及上表一致。MySQL 可达且存在 `user` 表时，4 条用例执行；否则 **SKIP**，整体仍可通过。
+1. `FIVE_STONES_WITH_REDIS=OFF`（基线）
+2. `FIVE_STONES_WITH_REDIS=ON` 且 Redis 可用（对照）
 
-可选覆盖连接与规模：
+对比关注：`http_reqs/s`、`http_req_duration p(95)/p(99)`、`http_req_failed`。
 
-```bash
-export MYSQL_HOST=127.0.0.1
-export MYSQL_USER=你的用户
-export MYSQL_PASSWORD=你的密码
-export MYSQL_DATABASE=online_gobang_test
-# 可选：MYSQL_PORT
-# STRESS_THREADS：默认 128，范围 1～512
-# STRESS_ITERS：默认 500，范围 1～100000
-ctest --test-dir build --output-on-failure
-```
+## 常见问题排查
 
-**数据清理**：用例会删除 **`username LIKE 'ft%'`** 的行（压测专用前缀）。请在**独立测试库**上跑压测；若与业务库共用库名，仍有误删风险，需谨慎。
+### 为什么有 `build`、`build_no_redis`、`build_redis_on`？
 
-**说明**：压测里若 `MYSQL_PORT` 无法解析会**忽略**该变量；**服务端 `gobang_server`** 在 [`load_server_cfg`](five-stones/include/app_config.hpp) 中对非法 `MYSQL_PORT` 会**报错退出**，行为不同。
+这些目录不是源码创建，而是 CMake 在执行 `cmake -B <目录名>` 时自动创建的构建目录。
 
-`user_table` 为单连接并对部分 API 加锁；压测用于观察多线程下稳定性与吞吐。
+### 如何确认 Redis 宏是否真的注入？
 
-### 9) 可选：VS Code / Cursor（CMake Tools）
+查看 `build/compile_commands.json` 中 `main.cc` 对应编译命令，是否包含 `-DFIVE_STONES_WITH_REDIS=1`。
 
-工作区含 [`.vscode/settings.json`](.vscode/settings.json)：`cmake.sourceDirectory` 指向仓库根，Linux 上推荐 **Unix Makefiles** 与 `CMAKE_MAKE_PROGRAM=/usr/bin/make`，避免子目录误配或 Windows 路径残留。若仍失败，检查用户/远程设置中的 `cmake.generator` 等是否含无效路径。
+### `CMakeCache.txt` 显示 ON，但实际没走 Redis，为什么？
 
-生成 `compile_commands.json`（如给 clangd）：配置时加 `-DCMAKE_EXPORT_COMPILE_COMMANDS=ON`。
-
----
+`FIVE_STONES_WITH_REDIS:BOOL=ON` 表示选项倾向开启；若依赖探测失败，配置阶段仍可能关闭 Redis 分支，最终编译命令里不会出现 `-DFIVE_STONES_WITH_REDIS=1`。
 
 ## 目录结构
-- [`.gitignore`](.gitignore)：忽略 `build/` 等
-- [`CMakeLists.txt`](CMakeLists.txt)：顶层工程、`add_subdirectory(five-stones)`、测试时 `add_subdirectory(tests)`
-- [`tests/`](tests/)：GoogleTest（[`tests/CMakeLists.txt`](tests/CMakeLists.txt)、各 `.cc`、`wsserver_for_tests.h`）
-- [`five-stones/include/match_queue.hpp`](five-stones/include/match_queue.hpp)：匹配队列模板（[`match.hpp`](five-stones/include/match.hpp) 包含）
-- [`.vscode/settings.json`](.vscode/settings.json)（可选）：CMake Tools 约定
-- [`five-stones/CMakeLists.txt`](five-stones/CMakeLists.txt)：`gobang_server`、`WWWROOT`、链接库
-- [`five-stones/src/main.cc`](five-stones/src/main.cc)：入口，`load_server_cfg` 后构造服务并 `start`
-- [`five-stones/include/app_config.hpp`](five-stones/include/app_config.hpp)：运行时环境变量与默认配置
-- [`five-stones/include/`](five-stones/include/)：`server.hpp`、`db.hpp`、`session.hpp`、`online.hpp`、`match.hpp`、`room.hpp` 等
-- [`five-stones/resources/wwwroot/`](five-stones/resources/wwwroot/)：前端静态页
 
----
-
-## 核心链路
-
-### HTTP：登录与会话
-1. 浏览器 `POST /login`
-2. `server.hpp::login` → `user_table::login`
-3. `session_manager::create_session` 生成 `SSID`
-4. `Set-Cookie: SSID=...`；后续请求用 Cookie 还原 uid
-
-### WS：大厅匹配（/hall）
-1. `WS /hall` → `wsopen_game_hall`（`hall_ready`）
-2. `{optype:match_start}` → `wsmsg_game_hall` → `matcher::add(uid)`
-3. 匹配线程配对 → `room_manager::create_room` → `match_success`
-
-### WS：房间对局（/room）
-1. `WS /room` → `wsopen_game_room`（`room_ready`）
-2. 落子/聊天等 → `wsmsg_game_room` → `room::handle_request`
-3. `room::broadcast` 同步双方与观战者
-
-### WS：观战（/spectate）
-1. `game_room.html?spectate=1&room_id=...`
-2. `WS /spectate` 后发 `spectate_join`
-3. `wsmsg_spectate`：加入观战表，回 `spectate_ready` 与棋盘快照
-4. 房间内广播同样发给观战者
-
----
-
-## 注意事项
-- `/room` 断连会触发退出与房间清理，**无**断线续局；SSID 未过期可免重复登录（与上文「项目简介」一致）。
+- `CMakeLists.txt`：顶层工程入口
+- `five-stones/CMakeLists.txt`：服务目标、宏注入、链接配置
+- `five-stones/include/`：核心头文件（`server.hpp`、`db.hpp`、`session.hpp` 等）
+- `five-stones/src/main.cc`：程序入口
+- `five-stones/resources/wwwroot/`：静态页面
+- `tests/`：gtest 测试
+- `scripts/k6/`：k6 压测脚本与清理脚本
