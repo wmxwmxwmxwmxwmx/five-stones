@@ -1,26 +1,49 @@
-# five-stones：在线五子棋对战后端
+# five-stones：在线五子棋后端
 
-`five-stones` 是基于 C++17 的 Linux 后端服务，提供 HTTP 与 WebSocket 一体化能力，包含注册登录、会话鉴权、大厅匹配、房间对局、观战同步与战绩落库。
+`five-stones` 是一个 C++17 Linux 后端项目，整合 HTTP 与 WebSocket，覆盖注册登录、会话鉴权、大厅匹配、房间对战、观战同步和战绩落库。项目重点不只是“能跑”，还强调“可观测、可压测、可解释”。
 
-## 功能概览
+## 项目速览
 
-- HTTP：静态资源、`POST /reg`、`POST /login`、`GET /info`
-- WebSocket：`/hall`、`/room`、`/spectate` 三类实时通道
-- 数据存储：MySQL 用户与战绩
-- 可选缓存：Redis（编译期可开关，运行期可降级）
+- **技术栈**：C++17、websocketpp/asio、MySQL、JsonCpp、可选 Redis
+- **系统能力**：HTTP 用户接口 + WebSocket 实时对战三通道（`/hall`、`/room`、`/spectate`）
+- **工程亮点**：
+  - Redis 编译期开关 + 运行时降级（依赖异常时自动回退）
+  - 登录链路稳健性增强（SQL 取数策略与失败日志完善）
+  - k6 压测口径治理（setup 重试、default 不重试、失败分桶）
+  - 新增缓存指标接口 `GET /metrics/cache`（本机只读）
 
-## 快速开始
+## 关键设计与优化
+
+### 1) 登录链路稳健性
+
+- 调整登录 SQL 取数策略，规避异常数据下“非唯一结果”带来的不稳定行为。
+- 补强登录失败日志，定位失败原因更直接（业务失败 vs 会话创建失败）。
+
+### 2) 缓存可观测性
+
+- 新增 `GET /metrics/cache`，输出：
+  - `redis_hits_total`
+  - `redis_miss_total`
+  - `redis_errors_total`
+  - `redis_hit_rate`
+- 该接口仅允许 `127.0.0.1` / `::1`，用于本机压测联动与排障。
+
+### 3) 压测可信度治理（k6）
+
+- setup 阶段仅对瞬时网络错误做有限重试，避免脏前置数据。
+- default 阶段不重试，保留真实失败率，避免“重试掩盖问题”。
+- 登录脚本提供失败分桶指标，区分 `status=0`、`400`、`5xx`。
+
+## 快速开始（5 分钟可跑通）
 
 ### 1) 安装依赖
-
-Ubuntu 示例：
 
 ```bash
 sudo apt update
 sudo apt install -y build-essential cmake libmysqlclient-dev libjsoncpp-dev libboost-system-dev
 ```
 
-说明：Redis 后端依赖 `redis-plus-plus` 与 `hiredis`，仅在你需要 Redis 缓存路径时安装。
+Redis 后端依赖 `redis-plus-plus` 和 `hiredis`，仅在需要 Redis 路径时安装。
 
 ### 2) 准备数据库
 
@@ -39,91 +62,66 @@ CREATE TABLE IF NOT EXISTS user (
 );
 ```
 
-### 3) 编译
-
-必须在仓库根目录（含顶层 `CMakeLists.txt`）执行：
+### 3) 编译与运行
 
 ```bash
 cmake -S . -B build
 cmake --build build -j
-```
-
-可执行文件输出到 `build/gobang_server`。
-
-### 4) 启动
-
-```bash
 ./build/gobang_server 8080
 ```
 
-浏览器访问 `http://127.0.0.1:8080/`。
+访问：`http://127.0.0.1:8080/`
 
-## Redis 开关与判定（重点）
+## Redis 开关与运行判定
 
-### 编译期是否启用 Redis 代码
-
-- 默认尝试启用：`-DFIVE_STONES_WITH_REDIS=ON`
-- 显式关闭：`-DFIVE_STONES_WITH_REDIS=OFF`
-- 当配置为 ON 但未找到 `redis++/hiredis` 时，CMake 会警告并关闭 Redis 后端
-
-建议：
+### 编译期开关
 
 ```bash
-# 无 Redis 后端
+# 关闭 Redis 后端
 cmake -S . -B build_no_redis -DFIVE_STONES_WITH_REDIS=OFF
 
 # 尝试启用 Redis 后端
 cmake -S . -B build_redis_on -DFIVE_STONES_WITH_REDIS=ON
 ```
 
-### 运行期是否真正使用 Redis
+说明：`ON` 仅表示尝试启用；若依赖探测失败，CMake 会自动退回非 Redis 路径。
 
-若二进制已编进 Redis 分支，服务启动时会出现以下日志之一：
+### 运行期判定
 
-- `redis cache enabled: ...`：已连接 Redis，正在使用缓存
-- `redis init failed, fallback to in-memory/mysql path: ...`：初始化失败，已降级到内存/MySQL 路径
+启动日志出现以下任一信息：
 
-若这两条都没有，通常说明当前二进制未编入 Redis 分支（可检查 `compile_commands.json` 是否含 `-DFIVE_STONES_WITH_REDIS=1`）。
+- `redis cache enabled: ...`：Redis 已启用
+- `redis init failed, fallback to in-memory/mysql path: ...`：Redis 初始化失败并已降级
 
-## HTTP 接口与状态码
+## 接口与状态码（核心）
 
-### `POST /reg`
+- `POST /reg`
+  - `200` 注册成功
+  - `400` 参数错误 / 用户名占用
+- `POST /login`
+  - `200` 登录成功并返回 `Set-Cookie: SSID=...`
+  - `400` 参数错误 / 用户名或密码错误
+  - `500` 会话创建失败
+- `GET /info`
+  - `200` 返回当前用户信息
+  - `400` 用户信息缺失（需重新登录）
+- `GET /metrics/cache`（只读）
+  - `200` 返回缓存命中/未命中/错误及命中率
+  - `403` 非本机访问
 
-- `200`：注册成功
-- `400`：请求体 JSON 非法、缺少用户名/密码、用户名已占用
+## 性能与稳定性（可复现结论）
 
-### `POST /login`
+已使用 k6 在同机同参数下做分层压测（读路径与写路径分离）：
 
-- `200`：登录成功（返回 `Set-Cookie: SSID=...`）
-- `400`：请求体 JSON 非法、缺少用户名/密码、用户名或密码错误
-- `500`：会话创建失败
+- `80 VUs / 2m`：读写路径均稳定，失败率为 0，延迟低
+- `120 VUs / 2m`：仍稳定，登录写路径 `p95` 在阈值内
+- `150 VUs / 2m`：登录写路径开始触达延迟拐点（`p95` 接近/超过 200ms）
 
-### `GET /info`
+工程解读：当前系统不是“错误率先崩”，而是“高并发下延迟先上升”，适合先做容量优化和并发治理。
 
-- `200`：返回当前用户信息
-- `400`：找不到用户信息（需重新登录）
+详细压测方法见 [`scripts/k6/README.md`](scripts/k6/README.md)。
 
-## 服务端环境变量
-
-| 变量 | 含义 | 默认值 |
-|------|------|--------|
-| `MYSQL_HOST` | MySQL 主机 | `127.0.0.1` |
-| `MYSQL_USER` | MySQL 用户名 | `wmx` |
-| `MYSQL_PASSWORD` | MySQL 密码 | `123456` |
-| `MYSQL_DATABASE` | MySQL 库名 | `online_gobang` |
-| `MYSQL_PORT` | MySQL 端口 | `3306` |
-| `REDIS_HOST` | Redis 主机 | `127.0.0.1` |
-| `REDIS_PORT` | Redis 端口 | `6379` |
-| `REDIS_PASSWORD` | Redis 密码 | 空 |
-| `REDIS_DB` | Redis DB 索引 | `0` |
-| `REDIS_TIMEOUT_MS` | Redis 超时毫秒 | `200` |
-| `SERVER_PORT` | 服务监听端口 | `8080` |
-| `WWWROOT` | 静态资源目录 | 编译期注入路径 |
-| `LOG_LEVEL` | 日志级别（`debug/info/error`） | `debug` |
-
-端口优先级：命令行参数 `./gobang_server <port>` > `SERVER_PORT` > 默认 `8080`。
-
-## 测试与压测
+## 测试与验证
 
 ### 单元测试（gtest）
 
@@ -133,39 +131,33 @@ cmake --build build -j
 ctest --test-dir build --output-on-failure
 ```
 
-测试目标为 `build/tests/five_stones_tests`。
+### k6 压测
 
-### k6 压测（Redis 前后对比）
+```bash
+export BASE_URL=http://127.0.0.1:8080
+./scripts/k6/run_k6_with_cleanup.sh run scripts/k6/info_user_cache.js
+./scripts/k6/run_k6_with_cleanup.sh run scripts/k6/login_session_write.js
+```
 
-压测脚本位于 `scripts/k6/`，详见 [`scripts/k6/README.md`](scripts/k6/README.md)。
+## 后续优化方向
 
-推荐对比方式：同一台机器、同一组 k6 参数下分别运行：
+- 在明确线程安全边界后，评估“单 Reactor + 多线程 run()”提升并发能力。
+- 加入系统层观测（CPU、fd、队列、慢 SQL）做瓶颈归因闭环。
+- 补充线上化能力：配置分环境、告警阈值、压力回归流水线。
 
-1. `FIVE_STONES_WITH_REDIS=OFF`（基线）
-2. `FIVE_STONES_WITH_REDIS=ON` 且 Redis 可用（对照）
+## 常见问题
 
-对比关注：`http_reqs/s`、`http_req_duration p(95)/p(99)`、`http_req_failed`。
+- `CMakeCache.txt` 显示 Redis ON，为何没生效？  
+  依赖探测失败时会自动降级，最终以编译命令和启动日志为准。
 
-## 常见问题排查
-
-### 为什么有 `build`、`build_no_redis`、`build_redis_on`？
-
-这些目录不是源码创建，而是 CMake 在执行 `cmake -B <目录名>` 时自动创建的构建目录。
-
-### 如何确认 Redis 宏是否真的注入？
-
-查看 `build/compile_commands.json` 中 `main.cc` 对应编译命令，是否包含 `-DFIVE_STONES_WITH_REDIS=1`。
-
-### `CMakeCache.txt` 显示 ON，但实际没走 Redis，为什么？
-
-`FIVE_STONES_WITH_REDIS:BOOL=ON` 表示选项倾向开启；若依赖探测失败，配置阶段仍可能关闭 Redis 分支，最终编译命令里不会出现 `-DFIVE_STONES_WITH_REDIS=1`。
+- 如何确认宏注入？  
+  检查 `build*/compile_commands.json` 是否出现 `-DFIVE_STONES_WITH_REDIS=1`。
 
 ## 目录结构
 
-- `CMakeLists.txt`：顶层工程入口
-- `five-stones/CMakeLists.txt`：服务目标、宏注入、链接配置
-- `five-stones/include/`：核心头文件（`server.hpp`、`db.hpp`、`session.hpp` 等）
+- `CMakeLists.txt`：顶层构建入口
+- `five-stones/CMakeLists.txt`：服务目标与宏注入
+- `five-stones/include/`：核心模块（`server.hpp`、`db.hpp`、`session.hpp` 等）
 - `five-stones/src/main.cc`：程序入口
-- `five-stones/resources/wwwroot/`：静态页面
-- `tests/`：gtest 测试
-- `scripts/k6/`：k6 压测脚本与清理脚本
+- `tests/`：单元测试
+- `scripts/k6/`：压测脚本与数据清理脚本

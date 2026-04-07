@@ -9,11 +9,9 @@ import { check } from "k6";
 
 const password = __ENV.K6_PASSWORD || "k6test123";//密码
 const infoIters = parseInt(__ENV.K6_INFO_ITERS || "50", 10);//每轮迭代内 /info 请求次数（从 k6 的环境变量中读取一个字符串，如果未设置则使用默认值 20）
-const vus = parseInt(__ENV.K6_VUS || "20", 10);//并发用户数（默认 20 个）
+const vus = parseInt(__ENV.K6_VUS || "120", 10);//并发用户数（默认 120 个）
 const duration = __ENV.K6_DURATION || "1m";//持续时间（默认 1 分钟）
-const rawBase = __ENV.BASE_URL || "http://localhost:8080";
-const base = rawBase.trim().replace(/[。.,;；]+$/u, ""); // 容错：去掉末尾中英文标点
-
+const base = __ENV.BASE_URL || "http://localhost:8080";
 //在持续时间内维持 vus 个虚拟用户；每个 VU 会不断重复执行 export default function () { ... }，直到时间到。
 export const options = {
   scenarios: {

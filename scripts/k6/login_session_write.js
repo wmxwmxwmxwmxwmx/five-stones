@@ -10,10 +10,9 @@ import { Counter, Rate } from "k6/metrics";
 const password = __ENV.K6_PASSWORD || "k6test123";
 const nUsers = parseInt(__ENV.K6_LOGIN_USERS || "100", 10);//预注册用户数（默认 100 个）
 const loginIters = parseInt(__ENV.K6_LOGIN_ITERS || "20", 10);//每轮迭代内登录次数（默认 20 次）
-const vus = parseInt(__ENV.K6_VUS || "20", 10);//并发用户数（默认 20 个）
+const vus = parseInt(__ENV.K6_VUS || "120", 10);//并发用户数（默认 120 个）
 const duration = __ENV.K6_DURATION || "1m";//持续时间（默认 1 分钟）
-const rawBase = __ENV.BASE_URL || "http://localhost:8080";
-const base = rawBase.trim().replace(/[。.,;；]+$/u, ""); // 容错：去掉末尾中英文标点
+const base = __ENV.BASE_URL || "http://localhost:8080";
 const runTag = `${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
 const setupFailRate = new Rate("setup_reg_failed_rate");//注册失败率
 const loginStatus0 = new Counter("login_status0_total");//登录成功次数
