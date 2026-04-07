@@ -11,6 +11,7 @@ typedef websocketpp::connection_hdl connection_hdl;
 typedef websocketpp::lib::shared_ptr<websocketpp::lib::asio::steady_timer> timer_ptr;
 
 #include "db.hpp"
+#include "cache/cache_metrics.hpp"
 #include "cache/session_cache.hpp"
 #include "cache/user_cache.hpp"
 #ifdef FIVE_STONES_WITH_REDIS
@@ -69,6 +70,60 @@ private:
         conn->set_status(code);
         conn->set_body(resp_body);
         conn->append_header("Content-Type", "application/json");
+    }
+
+    // 仅允许本机访问缓存指标接口
+    bool is_local_metrics_request(wsserver_t::connection_ptr &conn)
+    {
+        try
+        {
+            const std::string endpoint = conn->get_remote_endpoint(); // 形如 "127.0.0.1:12345" 或 "[::1]:12345"
+            if (endpoint.empty())
+                return false;
+
+            if (endpoint.rfind("127.0.0.1:", 0) == 0)
+                return true;
+            if (endpoint.rfind("[::1]:", 0) == 0)
+                return true;
+
+            return false;
+        }
+        catch (const std::exception &e)
+        {
+            ERR_LOG("metrics endpoint remote parse failed: %s", e.what());
+            return false;
+        }
+        catch (...)
+        {
+            ERR_LOG("metrics endpoint remote parse failed: unknown exception");
+            return false;
+        }
+    }
+
+    // 缓存指标接口（HTTP）
+    void cache_metrics_handler(wsserver_t::connection_ptr &conn)
+    {
+        if (!is_local_metrics_request(conn))
+            return http_resp(conn, false, websocketpp::http::status_code::forbidden, "forbidden");
+
+        const uint64_t hits = cache_metrics::redis_hits_total.load(std::memory_order_relaxed);
+        const uint64_t miss = cache_metrics::redis_miss_total.load(std::memory_order_relaxed);
+        const uint64_t errs = cache_metrics::redis_errors_total.load(std::memory_order_relaxed);
+        const uint64_t total = hits + miss;
+        const double hit_rate = (total == 0) ? 0.0 : (static_cast<double>(hits) / static_cast<double>(total));
+
+        Json::Value resp_json;
+        resp_json["result"] = true;
+        resp_json["redis_hits_total"] = Json::UInt64(hits);
+        resp_json["redis_miss_total"] = Json::UInt64(miss);
+        resp_json["redis_errors_total"] = Json::UInt64(errs);
+        resp_json["redis_hit_rate"] = hit_rate;
+
+        std::string body;
+        json_util::serialize(resp_json, body);
+        conn->set_body(body);
+        conn->append_header("Content-Type", "application/json");
+        conn->set_status(websocketpp::http::status_code::ok);
     }
 
     // 静态资源请求处理
@@ -158,7 +213,7 @@ private:
         bool ret = _ut.login(login_info); // 登录验证
         if (!ret)
         {
-            DBG_LOG("用户名或密码错误");
+            DBG_LOG("login failed for username=%s", login_info["username"].asCString());
             return http_resp(conn, false, websocketpp::http::status_code::bad_request, "用户名或密码错误");
         }
 
@@ -166,7 +221,7 @@ private:
         session_ptr ssp = _sm.create_session(uid, LOGIN); // 创建会话
         if (!ssp)
         {
-            DBG_LOG("创建会话失败"); // 创建失败
+            DBG_LOG("create session failed for uid=%llu", (unsigned long long)uid); // 创建失败
             return http_resp(conn, false, websocketpp::http::status_code::internal_server_error, "创建会话失败");
         }
 
@@ -287,6 +342,8 @@ private:
             return login(conn);
         if (method == "GET" && uri == "/info") // 判断方法和URI是否匹配
             return info(conn);
+        if (method == "GET" && uri == "/metrics/cache")
+            return cache_metrics_handler(conn);
         return file_handler(conn); // 处理文件请求
         // 注：函数调用结束后，响应自动发送给客户端
     }

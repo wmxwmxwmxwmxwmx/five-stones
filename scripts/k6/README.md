@@ -13,7 +13,24 @@
 | 脚本 | 主要目标 | 说明 |
 |------|----------|------|
 | [`info_user_cache.js`](info_user_cache.js) | 用户信息读路径 | `setup()` 一次性为每个 VU 预注册并登录，`default(data)` 仅循环 `GET /info`；用户名会附带运行标识避免历史数据冲突，setup 的 POST 请求含有限重试以缓解瞬时 EOF |
-| [`login_session_write.js`](login_session_write.js) | 登录写路径 | `setup()` 预注册用户（含有限重试），`default()` 循环 `POST /login`，重点观察会话创建与 Redis `setSession` 写入开销 |
+| [`login_session_write.js`](login_session_write.js) | 登录写路径 | `setup()` 预注册用户（含有限重试），`default()` 循环单次 `POST /login`（不重试，真实反映登录失败率），重点观察会话创建与 Redis `setSession` 写入开销 |
+
+## 缓存指标接口（只读）
+
+服务端新增了只读接口 `GET /metrics/cache`，用于观测 Redis 缓存计数与命中率。
+
+- 仅允许本机访问（`127.0.0.1` / `::1`），非本机返回 `403`
+- 返回字段：
+  - `redis_hits_total`
+  - `redis_miss_total`
+  - `redis_errors_total`
+  - `redis_hit_rate`（`hits / (hits + miss)`，分母为 0 时返回 0.0）
+
+示例：
+
+```bash
+curl http://127.0.0.1:8080/metrics/cache
+```
 
 ## k6 生命周期说明（与当前脚本一致）
 
@@ -22,7 +39,8 @@
 - `export default function (data)`：每个 VU 在压测期间循环执行，承担主要请求压力
 
 当前 `login_session_write.js` 的 `setup()` 不返回数据；`info_user_cache.js` 的 `setup()` 返回 cookie 列表供 `default(data)` 使用。
-两脚本 setup 中的 `POST /reg`、`POST /login` 已加入有限重试（仅针对网络层瞬时失败如 `status=0/EOF`），不改变业务 400 的判定口径。
+两脚本 setup 中的 `POST /reg`、`POST /login` 已加入有限重试（仅针对网络层瞬时失败如 `status=0/EOF`），不改变业务 400 的判定口径。`login_session_write.js` 的 default 阶段不重试，便于直接观测真实失败率。
+`login_session_write.js` 还会输出失败分桶计数：`login_status0_total`（网络/EOF）、`login_status400_total`（业务失败）、`login_status500_total`（服务端异常）与 `login_status_other_total`。
 
 ## 环境变量
 
@@ -60,6 +78,7 @@ k6 run scripts/k6/info_user_cache.js
 1. 基线 A：`-DFIVE_STONES_WITH_REDIS=OFF`，编译并启动服务，执行同一条 k6 命令
 2. 基线 B：`-DFIVE_STONES_WITH_REDIS=ON`，Redis 服务可用，执行同一条 k6 命令
 3. 两组都记录：全局 `http_reqs`、`http_req_duration p(95)/p(99)`、`http_req_failed`，并重点对比 `name=GET /info` 的专属指标
+4. 每组压测前后各调用一次 `GET /metrics/cache`，观察命中率和错误计数变化，验证 Redis 是否真正生效
 
 对比原则：同机器、同数据量、同 `K6_VUS/K6_DURATION/K6_INFO_ITERS`，仅改变 Redis 条件。
 

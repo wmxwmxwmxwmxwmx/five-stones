@@ -74,7 +74,7 @@ public:
             return false;
         }
 
-        #define LOGIN_USER "select id, score, total_count, win_count from user where username='%s' and password='%s';"
+        #define LOGIN_USER "select id, score, total_count, win_count from user where username='%s' and password='%s' order by id desc limit 1;"
 
         char sql[4096] = {0};
         sprintf(sql, LOGIN_USER, user["username"].asCString(), user["password"].asCString());
@@ -102,9 +102,9 @@ public:
         }
 
         int row_num = mysql_num_rows(res);
-        if (row_num != 1)
+        if (row_num < 1)
         {
-            DBG_LOG("the user information queried is not unique!!");
+            DBG_LOG("login query returned empty result");
             mysql_free_result(res);
             return false;
         }
