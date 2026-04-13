@@ -32,7 +32,7 @@ struct MysqlStressCfg
     int stress_threads = 128;
     int stress_iters = 500;
 
-    bool valid = false;
+    bool valid = false;// 仅 load_cfg 成功时为 true；夹具 SetUp 中 ping_mysql 失败时跳过测试，未算失败。
 };
 
 // 以 main.cc 默认值为基，可选读取 MYSQL_*、MYSQL_PORT、STRESS_THREADS、STRESS_ITERS。
@@ -111,21 +111,21 @@ protected:
     // 连不上 MySQL 时 SKIP；否则清空 ft% 测试数据并创建共用的 user_table。
     void SetUp() override
     {
-        cfg_ = load_cfg();
-        if (!ping_mysql(cfg_))
+        cfg_ = load_cfg();//从环境变量中加载配置
+        if (!ping_mysql(cfg_))//尝试连接MySQL，如果连接失败则跳过测试
         {
             GTEST_SKIP() << "MySQL connection failed (defaults match main.cc; override MYSQL_* or start server)";
         }
-        cleanup_ft_test_users(cfg_);
-        ut_.reset(new user_table(cfg_.host, cfg_.user, cfg_.pass, cfg_.db, cfg_.port));
+        cleanup_ft_test_users(cfg_);//清理ft%测试数据
+        ut_.reset(new user_table(cfg_.host, cfg_.user, cfg_.pass, cfg_.db, cfg_.port));//创建user_table实例
     }
 
     // 释放 user_table 并删除本文件产生的 ft% 行，避免测试库膨胀。
     void TearDown() override
     {
-        ut_.reset();
+        ut_.reset();//释放user_table实例
         if (cfg_.valid)
-            cleanup_ft_test_users(cfg_);
+            cleanup_ft_test_users(cfg_);//清理ft%测试数据
     }
 };
 
